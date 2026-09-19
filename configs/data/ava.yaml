@@ -1,0 +1,6 @@
+# Paths are external to the repository.  The CLI accepts --data-root or IAM_DATA_ROOT.
+data_root: ${IAM_DATA_ROOT:-/Users/rushivyas/datasets/image-aesthetics}
+dataset: ava
+manifest: ava/prepared/v1/dataset.jsonl
+images: ava/raw/images
+do_not_download_automatically: true

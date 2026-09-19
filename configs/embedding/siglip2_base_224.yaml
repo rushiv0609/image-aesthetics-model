@@ -1,0 +1,11 @@
+model_id: google/siglip2-base-patch16-224
+# Replace with an immutable Hugging Face commit before running.
+model_revision: REQUIRED_PINNED_REVISION
+image_size: 224
+embedding_dim: 768
+dtype: float32
+batch_size: 32
+decode_workers: 8
+prepared_queue_batches: 3
+shard_size: 4096
+max_attempts: 3

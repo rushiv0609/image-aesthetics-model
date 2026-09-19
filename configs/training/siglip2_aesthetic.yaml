@@ -1,0 +1,4 @@
+# Training config is kept separate from extraction/cache config.
+cache_dtype: float32
+embedding_dim: 768
+target: ava_rating_distribution

@@ -110,3 +110,18 @@ A trained model that:
 - A general-purpose IQA library
 - Cloud-based training or inference
 - Real-time video quality assessment (we score individual frames)
+
+## Product Decisions (2026-09-19)
+
+- **Score at ingestion time.** Compute the learned, query-independent score while ingesting each photo or sampled video frame and persist it in Qdrant. Query-time curation should consume the stored score rather than run the fusion model again.
+- **Start with one universal scorer.** The first model is not conditioned on the existing `cinematic`, `personal`, or `journey` profiles.
+- **Keep ranking integration experimental.** The learned score is initially a candidate for the final ranking score. We will also benchmark combinations with query relevance and/or legacy signals before fixing the production ranking formula.
+- **Keep query relevance outside the model.** Any combination with cosine similarity happens downstream and does not make cosine an input signal.
+- **Defer personalization.** User-specific preference learning, RL, bandits, and their UI are post-MVP work.
+- **Re-index on adoption.** Existing Moments Generator workspaces will be fully re-indexed when the new scoring pipeline is introduced; the first version does not need a compatibility mask for stale payloads.
+- **Future conditioning should be semantic.** If a later model is conditioned, prefer query/content categories such as mountains, treks, parties, people bonding, or weddings over the current creative-profile identifiers.
+- **Use SigLIP 2 Base 224.** The first aesthetic head and later fusion pipeline use `google/siglip2-base-patch16-224`; the 384 candidate was rejected for this phase because of its substantially higher memory footprint.
+- **Finalize the A1 SigLIP2 head.** Grouped cross-validation found A1 and A2 practically tied, so A1 was preferred because it is smaller. It was fit for the frozen 9-epoch policy on all development data and evaluated once on the locked test (`Spearman 0.771114`, pairwise accuracy `0.788921`). Release `a1-v1` is immutable.
+- **Do not train final fusion on AVA labels by default.** A1, NIMA, MUSIQ-aesthetic, and LAION-CLIP have AVA exposure. The final fusion model therefore uses independent aesthetic datasets for model selection, with AVA limited to dependency training and clearly marked diagnostic ablations.
+- **Keep aesthetic and technical supervision distinct.** Technical IQA datasets train an auxiliary task; their MOS values are not silently mixed with aesthetic ratings. The production output remains a standalone aesthetic score.
+- **Use a branch-aware gated MLP as the primary fusion candidate.** It is compared against linear, scalar-only, and flat-MLP baselines and is promoted only by cross-dataset and Moments-specific evidence.

@@ -453,3 +453,47 @@ Based on everything above, the recommended approach is:
 4. **Use Option C (MAB)** at the meta-level: if we end up with multiple trained models, use a bandit to select which model to trust for each image type, and adapt this selection from user feedback.
 
 This gives us a clear progression from simple → sophisticated, where each step is independently valuable and deployable.
+
+> **Superseded recommendation (2026-09-20):** the Transformer-first recommendation
+> above was made before the dependency experiments and cross-dataset leakage review.
+> The current decision is the branch-aware content-conditioned residual MLP in
+> `docs/final-fusion-model-plan.md`. A flat MLP remains mandatory as a baseline; MoE
+> and Transformer variants are controlled ablations, not presumed upgrades. A
+> ten-token Transformer is not automatically more expressive in a useful way, and
+> attention weights must not be presented as causal explanations.
+
+## Initial Delivery Decisions (2026-09-19)
+
+1. Train one universal, query-independent model first.
+2. Compute and store its score during Moments Generator ingestion.
+3. Treat the production ranking formula as an experiment: compare learned-score-only ranking against learned quality combined with query cosine and against the current heuristic.
+4. Train the SigLIP-based LAION-style head, but use controlled ablations to decide whether it, the CLIP-based head, or both belong in the final model.
+5. Exclude personalization, RL, and bandit adaptation from the initial deliverable.
+6. Require complete re-indexing when the learned scorer is integrated.
+
+## Recommended Target and Evaluation Protocol
+
+### Training target
+
+Use the full AVA 10-bin vote distribution as an auxiliary training target and derive the required scalar score as its expected value. Compare it with a mean-score regression baseline. Distribution supervision preserves disagreement and confidence information that a mean alone discards, while the derived expected value still provides the single `[0, 1]` ingestion score required by Moments Generator.
+
+Do not assume distribution prediction is automatically better. It has a larger output head, a more complex loss, and can spend capacity matching annotator uncertainty that does not improve ranking. Promote it only if it beats mean regression on held-out ranking and top-selection metrics.
+
+### Model-selection metrics
+
+Primary metrics should reflect curation rather than exact numerical calibration:
+
+- **Spearman rank correlation:** whether the model orders a collection similarly to human ratings.
+- **Pairwise accuracy:** how often it gives the higher score to the human-preferred image in a pair.
+- **Top-k quality/lift:** whether the small set of images actually selected for a reel has better human ratings than the heuristic or single-signal baselines.
+
+Use MAE/MSE and calibration as secondary diagnostics. They detect badly scaled scores but should not choose the winner by themselves: a model can have a small numerical error while ordering the best images incorrectly.
+
+### Leakage controls
+
+NIMA, MUSIQ-AVA, and LAION predictors have prior exposure to AVA or related aesthetic data. Therefore:
+
+- use official or reproducible image-disjoint splits;
+- never train the SigLIP aesthetic head on images used to validate the fusion model;
+- report ablations for embeddings alone, each pretrained score alone, scalar fusion, and full fusion;
+- include at least one non-AVA external test set and a small Moments-style personal-media benchmark before claiming production improvement.

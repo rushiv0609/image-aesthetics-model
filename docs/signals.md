@@ -76,16 +76,24 @@ The raw output is on a 1-10 scale (calibrated to AVA dataset scores), which we n
 
 ---
 
-## Signal 4: LAION Aesthetic Score (SigLIP 2-based) — TO BE TRAINED
+## Signal 4: SigLIP2 LAION-style A1 Aesthetic Score — FINALIZED
 
-**What it is:** The same MLP architecture as Signal 3, but trained on **SigLIP 2 embeddings** instead of CLIP embeddings. This does not yet exist — training it is one of the first tasks of this project.
+**What it is:** A distributional MLP trained on frozen **SigLIP 2 embeddings**. It is
+the SigLIP counterpart to the CLIP-based LAION signal, but it uses the smaller selected
+A1 topology: `LayerNorm(768) → Linear(768, 256) → GELU → Dropout(0.10) → Linear(256, 10)`.
+The ten logits represent the AVA rating distribution and the production scalar is its
+normalized expected rating.
 
 **Why we want it:** To directly compare whether SigLIP 2 or CLIP produces a better aesthetic predictor when used as the base embedding. SigLIP 2's sigmoid training may capture finer-grained aesthetic differences. Having both LAION scores also gives the fusion model two different "opinions" on aesthetics, one from each embedding space.
 
 **Characteristics:**
 - Range: 0.0 to 1.0 (same as CLIP-based version)
 - Depends on: Signal 1 (SigLIP 2 embedding)
-- Status: **Not yet trained.** Will be trained on the AVA dataset as part of this project.
+- Status: **Finalized as `a1-v1`.** Locked AVA test Spearman `0.771114` and pairwise accuracy `0.788921`.
+- Parameters: approximately 200K
+- Artifact: `/Users/rushivyas/datasets/image-aesthetics/ava/releases/siglip2-aesthetic/a1-v1/`
+- Model SHA-256: `b921e8568db6229a5a89810dd5c5823e755261acb9d0e91eb83fc35f594aabf1`
+- Evaluation requirement: compare it directly with the CLIP-based LAION signal and run ablations with each signal removed. Retain both in the final fusion model only if they provide complementary validation performance.
 
 ---
 
@@ -248,7 +256,7 @@ This is exactly why we need a learned model — it can learn the *conditional* v
 | 1 | SigLIP 2 embedding | Vector | 768 | SigLIP 2 ViT | Semantic content, scene understanding |
 | 2 | CLIP embedding | Vector | 768 | CLIP ViT-L/14 | Semantic content (contrastive) |
 | 3 | LAION score (CLIP) | Scalar | 1 | MLP on CLIP emb | High-level aesthetic appeal |
-| 4 | LAION score (SigLIP) | Scalar | 1 | MLP on SigLIP emb | Aesthetic appeal (to be trained) |
+| 4 | A1 score (SigLIP) | Scalar | 1 | Distributional MLP on SigLIP emb | Aesthetic appeal; finalized `a1-v1` |
 | 5 | NIMA aesthetic | Scalar | 1 | MobileNetV2 on pixels | Composition, lighting, harmony |
 | 6 | MUSIQ aesthetic | Scalar | 1 | ViT on multi-scale patches | Multi-scale composition |
 | 7 | MUSIQ technical | Scalar | 1 | ViT on multi-scale patches | Distortion, noise, blur |
@@ -257,3 +265,11 @@ This is exactly why we need a learned model — it can learn the *conditional* v
 | 10 | Colorfulness | Scalar | 1 | Hasler-Süsstrunk | Chroma richness, vividness |
 
 **Total input to the fusion model:** 2 vectors of 768 dimensions each + 8 scalar values = 1,544 features.
+
+## Source-Pipeline Validation Required Before Caching
+
+The current Moments Generator scoring code is a proof of concept, not the authoritative training-data generator yet. Before producing the feature cache:
+
+- Load a genuine AVA-trained NIMA checkpoint. The current implementation replaces the ImageNet MobileNetV2 classifier with a newly initialized 10-bin head when no custom checkpoint is supplied, so those outputs are not valid NIMA predictions.
+- Give MUSIQ an aspect-ratio-preserving, suitably sized image rather than the shared 224×224 embedding input. The current pipeline does not match the native/multi-scale behavior described above.
+- Version the preprocessing and every scorer checkpoint in cache metadata so a cache cannot silently mix incompatible signal definitions.
