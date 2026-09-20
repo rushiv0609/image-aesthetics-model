@@ -332,6 +332,21 @@ class Ledger:
     def counts(self) -> dict[str, int]:
         return {row[0]: row[1] for row in self.read("SELECT state,COUNT(*) FROM items GROUP BY state")}
 
+    def status_counts(self) -> dict[str, int]:
+        return dict(sorted(self.counts().items()))
+
+    def failures(self) -> list[dict[str, Any]]:
+        keys = ("image_id", "state", "error_type", "error_message")
+        return [dict(zip(keys, row)) for row in self.read("SELECT image_id,state,error_type,error_message FROM items WHERE state LIKE '%error' ORDER BY image_id")]
+
+    def completed_records(self) -> list[dict[str, Any]]:
+        keys=("image_id","manifest_position","shard_id","shard_row","embedding_checksum")
+        return [dict(zip(keys,row)) for row in self.read("SELECT image_id,manifest_position,shard_id,shard_row,embedding_checksum FROM items WHERE state='completed' ORDER BY manifest_position")]
+
+    def committed_shards(self) -> list[dict[str, Any]]:
+        keys=("shard_id","path","row_count","sha256")
+        return [dict(zip(keys,row)) for row in self.read("SELECT shard_id,path,row_count,sha256 FROM shards ORDER BY shard_id")]
+
     def next_shard_id(self) -> int:
         """Return the next unused committed shard ID.
 
