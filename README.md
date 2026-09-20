@@ -27,6 +27,7 @@ Everything in this repo — the data pipelines, the model architectures, the tra
 | [SigLIP 2 Resolution Benchmark Plan](docs/siglip2-resolution-benchmark-plan.md) | Luna-ready plan for benchmarking Base 224 against matching Base 384 on the production M5 Pro pipeline |
 | [AVA SigLIP 2 Training Implementation Plan](docs/ava-siglip2-training-implementation-plan.md) | Data acquisition, external storage, leakage-resistant splits, pre-embedding, architecture search, training, evaluation, and export plan for Base 224 |
 | [Final Multi-Signal Scorer Plan](docs/final-fusion-model-plan.md) | Independent dataset portfolio, leakage controls, critical architecture review, selected fusion design, training protocol, and release gates |
+| [Final Fusion Implementation Plan](docs/final-fusion-implementation-plan.md) | Detailed phased implementation, storage contracts, dataset registry, acquisition, adapters, caching, baselines, F5 training, and integration |
 | [AGENTS.md](AGENTS.md) | Rules and context for AI agents working on this repo |
 
 ## Hardware Target

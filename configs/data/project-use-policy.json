@@ -1,0 +1,15 @@
+{
+  "policy_version": 1,
+  "use_mode": "non-commercial-research",
+  "commercial_use": false,
+  "dataset_redistribution": false,
+  "trained_artifact_distribution": "undecided",
+  "approved_license_classes": [
+    "broad",
+    "research-only",
+    "academic-only"
+  ],
+  "unclear_license_action": "manual-review-required",
+  "decision_source": "Explicit user decision",
+  "decision_date": "2026-09-20"
+}
