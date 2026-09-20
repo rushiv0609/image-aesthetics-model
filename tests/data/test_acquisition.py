@@ -1,9 +1,12 @@
 import json
+import stat
+from zipfile import ZipFile, ZipInfo
 
 import pytest
 
 from image_aesthetics.data.acquisition import (
     safe_member_path,
+    extract_zip_safely,
     verify,
     write_manifest,
     write_multi_manifest,
@@ -86,3 +89,31 @@ def test_multi_file_manifest_rejects_external_and_duplicate_files(tmp_path):
             files=[(inside, "https://example.test/a"), (inside, "https://example.test/b")],
             source="test",
         )
+
+
+def test_extract_zip_safely_is_atomic_and_refuses_overwrite(tmp_path):
+    archive = tmp_path / "source.zip"
+    with ZipFile(archive, "w") as source:
+        source.writestr("nested/file.txt", "payload")
+    destination = tmp_path / "raw"
+    assert extract_zip_safely(archive, destination) == 1
+    assert (destination / "nested/file.txt").read_text() == "payload"
+    with pytest.raises(FileExistsError, match="overwrite"):
+        extract_zip_safely(archive, destination)
+
+
+def test_extract_zip_safely_rejects_traversal_and_symlinks(tmp_path):
+    traversal = tmp_path / "traversal.zip"
+    with ZipFile(traversal, "w") as source:
+        source.writestr("../escape.txt", "bad")
+    with pytest.raises(ValueError, match="escapes"):
+        extract_zip_safely(traversal, tmp_path / "raw-traversal")
+
+    symlink = tmp_path / "symlink.zip"
+    member = ZipInfo("link")
+    member.create_system = 3
+    member.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with ZipFile(symlink, "w") as source:
+        source.writestr(member, "target")
+    with pytest.raises(ValueError, match="symlink"):
+        extract_zip_safely(symlink, tmp_path / "raw-symlink")

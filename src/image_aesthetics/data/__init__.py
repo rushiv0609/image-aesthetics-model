@@ -1,1 +1,1 @@
-"""AVA acquisition, parsing, validation, and split tooling (future phases)."""
+"""Dataset acquisition, annotation adapters, validation, and split tooling."""

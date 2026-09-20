@@ -1,6 +1,6 @@
 """Small, safe dataset acquisition primitives (never handles credentials)."""
 from __future__ import annotations
-import hashlib, json, os, platform, shutil, urllib.request
+import hashlib, json, os, platform, shutil, stat, urllib.request, zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from .registry import DatasetRecord
@@ -132,3 +132,30 @@ def download(url: str, destination: Path) -> Path:
             shutil.copyfileobj(response, out)
     os.replace(partial, destination)
     return destination
+
+def extract_zip_safely(archive_path: Path, destination: Path) -> int:
+    """Extract a ZIP without allowing traversal, symlinks, or overwrite."""
+    destination.mkdir(parents=True, exist_ok=True)
+    extracted = 0
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            target = safe_member_path(destination, member.filename)
+            mode = member.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                raise ValueError(f"archive symlink is not allowed: {member.filename}")
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if target.exists():
+                raise FileExistsError(f"refusing to overwrite extracted file: {target}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(target.name + ".tmp")
+            try:
+                with archive.open(member) as source, temporary.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+                os.replace(temporary, target)
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+            extracted += 1
+    return extracted
