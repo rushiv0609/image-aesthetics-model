@@ -19,10 +19,10 @@ def test_acquisition_plan_is_deterministic_and_license_gated():
     records = load_registry(REGISTRY)
     assert [record.dataset_id for record in acquisition_plan(records)] == ["live_challenge"]
     assert [record.dataset_id for record in acquisition_plan(records, "non-commercial-research")] == [
-        "flickr_aes", "koniq10k", "live_challenge", "para",
+        "flickr_aes", "koniq10k", "live_challenge", "para", "spaq", "tad66k",
     ]
     assert all(record.acquisition_decision("commercial-safe")[0] for record in acquisition_plan(records))
-    assert not next(record for record in records if record.dataset_id == "tad66k").acquisition_decision("non-commercial-research")[0]
+    assert next(record for record in records if record.dataset_id == "tad66k").acquisition_decision("non-commercial-research")[0]
 
 
 def test_validation_catches_missing_license_decision(tmp_path):

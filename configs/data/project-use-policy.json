@@ -10,6 +10,20 @@
     "academic-only"
   ],
   "unclear_license_action": "manual-review-required",
+  "local_research_exceptions": [
+    {
+      "dataset_id": "spaq",
+      "redistribution": "prohibited",
+      "decision_source": "Explicit user approval for local self-learning POC",
+      "decision_date": "2026-09-20"
+    },
+    {
+      "dataset_id": "tad66k",
+      "redistribution": "prohibited",
+      "decision_source": "Explicit user approval for local self-learning POC",
+      "decision_date": "2026-09-20"
+    }
+  ],
   "decision_source": "Explicit user decision",
   "decision_date": "2026-09-20"
 }

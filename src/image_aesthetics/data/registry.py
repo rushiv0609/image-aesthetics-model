@@ -40,6 +40,7 @@ class DatasetRecord:
     known_upstream_overlap: tuple[str, ...]
     enabled: bool
     path: Path | None = None
+    local_research_exception: dict[str, Any] | None = None
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any], path: Path | None = None) -> "DatasetRecord":
@@ -61,6 +62,7 @@ class DatasetRecord:
             expected_files=tuple(value["expected_files"]),
             known_upstream_overlap=tuple(value["known_upstream_overlap"]),
             enabled=value["enabled"], path=path,
+            local_research_exception=value.get("local_research_exception"),
         )
 
     def errors(self) -> list[str]:
@@ -78,6 +80,13 @@ class DatasetRecord:
         if not self.expected_files or any(not isinstance(item, str) or not item for item in self.expected_files): errors.append("expected_files must be non-empty strings")
         if not isinstance(self.known_upstream_overlap, tuple): errors.append("known_upstream_overlap must be a list")
         if not isinstance(self.enabled, bool): errors.append("enabled must be boolean")
+        if self.local_research_exception is not None:
+            if not isinstance(self.local_research_exception, dict):
+                errors.append("local_research_exception must be an object")
+            else:
+                required = {"approved", "decision_source", "decision_date", "redistribution"}
+                if not required.issubset(self.local_research_exception): errors.append("local_research_exception is incomplete")
+                if self.local_research_exception.get("redistribution") != "prohibited": errors.append("local research exception must prohibit redistribution")
         return errors
 
     def acquisition_decision(self, use_mode: str) -> tuple[bool, str]:
@@ -91,6 +100,12 @@ class DatasetRecord:
             return True, "approved for commercial-safe local acquisition"
         if self.license_class in {"broad", "research-only", "academic-only"}:
             return True, "approved for local non-commercial research"
+        if (
+            self.local_research_exception
+            and self.local_research_exception.get("approved") is True
+            and self.local_research_exception.get("redistribution") == "prohibited"
+        ):
+            return True, "approved by explicit local non-commercial research exception; redistribution prohibited"
         return False, "license terms unclear; explicit source review required"
 
 
