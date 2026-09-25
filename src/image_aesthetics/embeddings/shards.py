@@ -44,7 +44,7 @@ def _fsync_directory(directory: Path) -> None:
 
 
 def write_atomic(path: Path, embeddings: Any, positions: list[int], image_ids: list[str],
-                 *, cache_schema_version: int = 1) -> tuple[str, Path]:
+                 *, cache_schema_version: int = 1, metadata_extra: dict[str, Any] | None = None) -> tuple[str, Path]:
     """Write one shard and metadata sidecar, returning checksum and path.
 
     The data file is fsynced before rename; the sidecar is renamed only after
@@ -83,6 +83,8 @@ def write_atomic(path: Path, embeddings: Any, positions: list[int], image_ids: l
             "image_ids": image_ids,
             "sha256": checksum,
         }
+        if metadata_extra:
+            sidecar.update(metadata_extra)
         fd, side_temporary_name = tempfile.mkstemp(prefix=f".{metadata_path.name}.", dir=path.parent)
         side_temporary = Path(side_temporary_name)
         try:
@@ -134,7 +136,7 @@ def verify_shard(path: Path, expected_dim: int = 768) -> dict[str, Any]:
     norms = np.linalg.norm(embeddings, axis=1)
     if embeddings.shape[1] != expected_dim:
         raise ValueError(f"expected dimension {expected_dim}, got {embeddings.shape[1]}")
-    if len(norms) and not np.allclose(norms, 1.0, atol=5e-3):
+    if metadata.get("unit_norm", True) and len(norms) and not np.allclose(norms, 1.0, atol=5e-3):
         raise ValueError(f"unit-norm validation failed: {path}")
     if len(metadata["positions"]) != len(set(metadata["positions"])):
         raise ValueError(f"duplicate manifest positions: {path}")

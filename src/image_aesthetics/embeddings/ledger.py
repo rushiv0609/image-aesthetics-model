@@ -203,10 +203,36 @@ class Ledger:
             raise RuntimeError("ledger writer failed") from self._writer_error
         ack: queue.Queue | None = queue.Queue(maxsize=1) if wait else None
         event = LedgerEvent(kind, payload, ack)
-        # Blocking here is intentional: terminal states must never be dropped.
-        self._events.put(event, timeout=timeout)
+        # Backpressure is deliberate, but a failed writer must not strand a
+        # producer behind a full queue until the arbitrary caller timeout.
+        # Polling also gives cancellation/shutdown paths a deterministic error
+        # rather than an apparent decode hang.
+        deadline = time.monotonic() + timeout
+        while True:
+            if self._writer_error:
+                raise RuntimeError("ledger writer failed") from self._writer_error
+            if self._thread is not None and not self._thread.is_alive():
+                raise RuntimeError("ledger writer stopped unexpectedly")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("timed out waiting for ledger writer queue")
+            try:
+                self._events.put(event, timeout=min(0.1, remaining))
+                break
+            except queue.Full:
+                continue
         if ack is not None:
-            result = ack.get(timeout=timeout)
+            while True:
+                if self._writer_error:
+                    raise RuntimeError("ledger writer failed") from self._writer_error
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("timed out waiting for ledger writer acknowledgement")
+                try:
+                    result = ack.get(timeout=min(0.1, remaining))
+                    break
+                except queue.Empty:
+                    continue
             if isinstance(result, BaseException):
                 raise result
             return result
@@ -217,6 +243,11 @@ class Ledger:
             return
         if not self._run_id:
             raise RuntimeError("cannot stop ledger before start_run")
+        if self._writer_error or not self._thread.is_alive():
+            self._stop.set()
+            self._thread.join(timeout=1)
+            self._thread = None
+            raise RuntimeError("ledger writer failed") from self._writer_error
         self.emit("run_state", run_id=self._run_id, state=state, error_message=error_message, wait=True)
         self._stop.set()
         self._events.put(None)
@@ -238,7 +269,11 @@ class Ledger:
                     event = None
                 if event is not None:
                     pending.append(event)
-                if pending and (len(pending) >= self.batch_size or event is None or self._stop.is_set()):
+                # A synchronous caller (notably shard commit) is a durability
+                # barrier.  Do not make it wait for a busy progress heartbeat
+                # stream to fill an arbitrary batch-size threshold.
+                if pending and (len(pending) >= self.batch_size or event is None or self._stop.is_set()
+                                or any(value.ack is not None for value in pending)):
                     self._apply_batch(conn, pending)
                     pending.clear()
             if pending:
@@ -276,6 +311,8 @@ class Ledger:
             state = p["state"]
             if state not in ITEM_STATES:
                 raise ValueError(f"invalid item state: {state}")
+            if state == "completed":
+                raise ValueError("completed is reserved for commit_shard")
             fields = ["state=?", "updated_at=?"]
             values: list[Any] = [state, now]
             if state == "decoding":
@@ -306,10 +343,12 @@ class Ledger:
                 (p["shard_id"], p["path"], p["row_count"], p["sha256"], p["min_position"], p["max_position"], now),
             )
             for row, item in enumerate(p["items"]):
-                conn.execute(
-                    "UPDATE items SET state='completed',shard_id=?,shard_row=?,embedding_checksum=?,updated_at=?,finished_at=? WHERE image_id=? AND manifest_position=?",
+                updated = conn.execute(
+                    "UPDATE items SET state='completed',shard_id=?,shard_row=?,embedding_checksum=?,updated_at=?,finished_at=? WHERE image_id=? AND manifest_position=? AND state IN ('pending','staged')",
                     (p["shard_id"], row, item["checksum"], now, now, item["image_id"], item["position"]),
                 )
+                if updated.rowcount != 1:
+                    raise ValueError(f"cannot commit already-finalized or unknown item {item['image_id']}")
         elif event.kind == "reset_orphans":
             conn.execute("UPDATE items SET state='pending',shard_id=NULL,shard_row=NULL,embedding_checksum=NULL,updated_at=? WHERE state IN ('decoding','decoded','embedding','staged')", (now,))
         else:

@@ -32,7 +32,7 @@ def main():
      errors.append({"type":"missing_shard","shard":shard.name}); continue
     if shard.suffix in (".safetensors", ".npz"):
      try:
-      emb, meta=read_shard(shard); verify_shard(shard); verified += 1; sid=int(shard.stem.split('-')[-1]); shard_rows[sid]=(meta,emb)
+      emb, meta=read_shard(shard); verify_shard(shard, int(meta.get("embedding_dim", 768))); verified += 1; sid=int(shard.stem.split('-')[-1]); shard_rows[sid]=(meta,emb)
       if sid not in ledger_shards:
        errors.append({"type":"orphan_shard","shard":shard.name})
       else:
