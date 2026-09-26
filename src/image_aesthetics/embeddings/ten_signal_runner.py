@@ -88,6 +88,9 @@ class _Progress:
     decode_seconds: float = 0.0
     resident_memory_gb: float = 0.0
     swap_used_gb: float = 0.0
+    swap_baseline_gb: float = 0.0
+    swap_delta_gb: float = 0.0
+    swap_scope: str = "host_wide"
     reorder_depth: int = 0
     max_reorder_depth: int = 0
     decode_backpressure_seconds: float = 0.0
@@ -107,6 +110,9 @@ class _Progress:
             "decode_seconds": self.decode_seconds,
             "resident_memory_gb": self.resident_memory_gb,
             "swap_used_gb": self.swap_used_gb,
+            "swap_baseline_gb": self.swap_baseline_gb,
+            "swap_delta_gb": self.swap_delta_gb,
+            "swap_scope": self.swap_scope,
             "reorder_depth": self.reorder_depth,
             "max_reorder_depth": self.max_reorder_depth,
             "decode_backpressure_seconds": self.decode_backpressure_seconds,
@@ -199,6 +205,17 @@ def _swap_gb() -> float:
         return value / 1024 if match.group(2) == "M" else value
     except Exception:
         return 0.0
+
+
+def canonical_items_sha256(items: Iterable[ManifestItem]) -> str:
+    rows = [{"image_id": item.image_id, "manifest_position": item.manifest_position,
+             "source_path": item.source_path, "source_size": item.source_size,
+             "source_mtime_ns": item.source_mtime_ns,
+             "source_fingerprint": item.source_fingerprint}
+            for item in sorted(items, key=lambda item: item.manifest_position)]
+    # Match the pre-existing cache-identity serialization byte-for-byte
+    # (json.dumps' default ensure_ascii=True) for backward verification.
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def source_fingerprints_sha256(items: Iterable[ManifestItem]) -> str:
@@ -301,7 +318,11 @@ class TenSignalRunner:
             ordered_ids_hash = hashlib.sha256(json.dumps([x.image_id for x in items], separators=(",", ":")).encode()).hexdigest()
             ledger.ensure_cache_identity(identity, manifest_hash, hashlib.sha256(
                 json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-                len(items), ordered_ids_hash, self._source_fingerprints_sha256)
+                len(items), ordered_ids_hash, self._source_fingerprints_sha256,
+                manifest_identity_kind="bytes" if contract_payload else "canonical_items",
+                manifest_bytes_sha256=(str(contract_payload["input_manifest_sha256"])
+                                       if contract_payload else ""),
+                canonical_items_sha256=canonical_items_sha256(items))
             ledger.seed_items([item.as_ledger_row() for item in items])
             dimensions = {name: int(contract["features"][name]["dimension"]) for name in self.feature_names}
             self._reconcile(ledger, items, dimensions, self.feature_names,
@@ -316,6 +337,9 @@ class TenSignalRunner:
                                      "cache_identity": identity, "manifest_sha256": manifest_hash,
                                      "source_fingerprints_sha256": self._source_fingerprints_sha256})
             ledger.start_writer()
+            progress.swap_baseline_gb = _swap_gb()
+            progress.swap_used_gb = progress.swap_baseline_gb
+            progress.swap_delta_gb = 0.0
             progress_thread = threading.Thread(target=self._progress_loop, args=(ledger,), daemon=True)
             progress_thread.start()
             pending = ledger.pending_items(cfg.max_attempts, cfg.retry_permanent)
@@ -343,6 +367,7 @@ class TenSignalRunner:
                 progress.state = "incomplete"
             progress.resident_memory_gb = _memory_gb()
             progress.swap_used_gb = _swap_gb()
+            progress.swap_delta_gb = progress.swap_used_gb - progress.swap_baseline_gb
             try:
                 if ledger._thread:
                     ledger.stop(progress.state, error)
@@ -393,11 +418,7 @@ class TenSignalRunner:
             manifest_hash = str(payload["input_manifest_sha256"])
             identity = str(payload["cache_identity"])
             return identity, manifest_hash
-        manifest_rows = [{"image_id": item.image_id, "manifest_position": item.manifest_position,
-                          "source_path": item.source_path, "source_size": item.source_size,
-                          "source_mtime_ns": item.source_mtime_ns,
-                          "source_fingerprint": item.source_fingerprint} for item in items]
-        manifest_hash = hashlib.sha256(json.dumps(manifest_rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        manifest_hash = canonical_items_sha256(items)
         identity = hashlib.sha256(json.dumps({"schema": "ten-signal-cache-v1", "manifest_sha256": manifest_hash,
             "contract": contract}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return identity, manifest_hash
@@ -413,6 +434,9 @@ class TenSignalRunner:
         while not self.cancel.wait(self.config.progress_interval_seconds):
             if self._progress:
                 self._progress.resident_memory_gb = _memory_gb()
+                self._progress.swap_used_gb = _swap_gb()
+                self._progress.swap_delta_gb = (
+                    self._progress.swap_used_gb - self._progress.swap_baseline_gb)
                 _write_progress(self.config.cache_dir / "progress.json", self._progress.snapshot())
                 ledger.emit("heartbeat", run_id=self._progress.run_id)
 

@@ -8,7 +8,7 @@ ROOT=Path(__file__).parents[2]
 sys.path.insert(0,str(ROOT/'src'))
 from image_aesthetics.embeddings.feature_contract import FEATURES, DIMENSIONS
 from image_aesthetics.embeddings.local_five_providers import (A1_PATH,A1_SHA256,LOCAL_FIVE,SIGLIP_MODEL,SIGLIP_REVISION,SIGLIP_SHA256,LocalFiveExtractor,local_five_contract_metadata)
-from image_aesthetics.embeddings.preprocess import load_manifest, preprocessing_contract
+from image_aesthetics.embeddings.preprocess import load_manifest
 from image_aesthetics.embeddings.metal_lock import metal_owner
 from image_aesthetics.embeddings.ten_signal_runner import (RunnerConfig, TenSignalRunner,
                                                            source_fingerprints_sha256)
@@ -69,6 +69,10 @@ def successful_smoke(items, feature_contract: dict, output: Path, *,
         "resume_elapsed_seconds": resume_elapsed,
         "initial_throughput_images_per_second": completed / initial_elapsed if initial_elapsed else 0.0,
         "resident_memory_gb": initial.get("resident_memory_gb"),
+        "swap_scope": initial.get("swap_scope", "host_wide"),
+        "swap_baseline_gb": initial.get("swap_baseline_gb"),
+        "swap_used_gb": initial.get("swap_used_gb"),
+        "swap_delta_gb": initial.get("swap_delta_gb"),
         "provider_seconds": initial.get("provider_seconds", {}),
         "provider_images": initial.get("provider_images", {}),
         "provider_failures": initial.get("provider_failures", {}),
@@ -84,8 +88,22 @@ def successful_smoke(items, feature_contract: dict, output: Path, *,
 def contract():
     meta=local_five_contract_metadata(); features={}
     for n in FEATURES:
-        active=n in LOCAL_FIVE
-        features[n]={"dimension":DIMENSIONS.get(n,1),"dtype":"float32","range":[-1,1] if n in DIMENSIONS else [0,1],"direction":"higher_is_better","model_revision":SIGLIP_REVISION if n=='siglip_embedding' else ('a1-v1' if n=='a1_siglip' else ('blocked-local-artifact' if not active else 'numpy-v1')),"checkpoint_sha256":A1_SHA256 if n=='a1_siglip' else (SIGLIP_SHA256 if n=='siglip_embedding' else hashlib.sha256(('blocked:'+n).encode()).hexdigest()),"preprocessing":preprocessing_contract() if n in ('siglip_embedding','a1_siglip') else {"formula":meta.get(n,{}).get('formula','blocked')},"normalization":meta.get(n,{}).get('normalization','blocked_fail_closed')}
+        if n in LOCAL_FIVE:
+            features[n] = {"dimension": DIMENSIONS.get(n, 1),
+                           **{key: meta[n][key] for key in (
+                               "dtype", "range", "direction", "model_revision",
+                               "checkpoint_sha256", "preprocessing", "normalization")}}
+        else:
+            # These are explicit inactive declarations, not active features or
+            # pretend checkpoint identities. They remain in the fixed schema.
+            features[n] = {
+                "dimension": DIMENSIONS.get(n, 1), "dtype": "float32",
+                "range": [-1, 1] if n in DIMENSIONS else [0, 1],
+                "direction": "higher_is_better", "model_revision": f"inactive-local-five:{n}",
+                "checkpoint_sha256": hashlib.sha256(f"inactive-local-five:{n}".encode()).hexdigest(),
+                "preprocessing": {"status": "not_generated_by_local_five"},
+                "normalization": "not_generated_by_local_five",
+            }
     return {"features":features}
 def main(argv=None):
  p=argparse.ArgumentParser();p.add_argument('--manifest',type=Path,required=True);p.add_argument('--image-root',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--preflight-only',action='store_true');a=p.parse_args(argv)

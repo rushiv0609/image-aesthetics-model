@@ -6,6 +6,7 @@ are known.  It never substitutes defaults for an unavailable neural scorer.
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -108,9 +109,71 @@ class LocalFiveExtractor:
 
 
 def local_five_contract_metadata() -> dict[str, dict[str, Any]]:
-    return {"siglip_embedding": {"model": SIGLIP_MODEL, "revision": SIGLIP_REVISION, "sha256": SIGLIP_SHA256, "normalization": "l2_float32_768"},
-            "a1_siglip": {"checkpoint": str(A1_PATH), "sha256": A1_SHA256,
-                           "formula": "(expected softmax rating - 1) / 9"},
-            "sharpness": {"formula": "laplacian_variance/1200 clipped"},
-            "contrast": {"formula": "gray_p95_minus_p5/220 clipped"},
-            "colorfulness": {"formula": "Hasler-Susstrunk/100 clipped"}}
+    # Shared decode describes pixels only. Model normalization belongs to the
+    # SigLIP branch; scalar formulas operate directly on these decoded bytes.
+    decoded_rgb = {
+        "image_size": 224, "decoder": "Pillow", "orientation": "EXIF transpose",
+        "color": "RGB", "pixel_dtype": "uint8", "pixel_layout": "HWC",
+        "resize": "aspect-preserving thumbnail", "interpolation": "Lanczos",
+        "padding": "black centered square canvas",
+    }
+    siglip_pixels = {
+        **decoded_rgb,
+        "model_normalization": {
+            "transform": "float32(pixel) / 127.5 - 1.0",
+            "equivalent_mean": [0.5, 0.5, 0.5],
+            "equivalent_std": [0.5, 0.5, 0.5],
+            "input_range": [0, 255], "output_range": [-1.0, 1.0],
+        },
+    }
+    signal = {
+        "siglip_embedding": {
+            "model_revision": f"{SIGLIP_MODEL}@{SIGLIP_REVISION}",
+            "checkpoint_sha256": SIGLIP_SHA256,
+            "dtype": "float32", "range": [-1.0, 1.0], "direction": "higher_is_better",
+            "preprocessing": siglip_pixels,
+            "normalization": "L2 unit norm across 768 dimensions; atol=0.005",
+        },
+        "a1_siglip": {
+            "model_revision": "AVA-A1-head-v1-on-SigLIP2-Base-224",
+            "checkpoint_sha256": A1_SHA256,
+            "dtype": "float32", "range": [0.0, 1.0], "direction": "higher_is_better",
+            "preprocessing": {"input_signal": "siglip_embedding", "input_dtype": "float32",
+                              "input_dimension": 768, "input_normalization": "L2 unit norm across 768 dimensions",
+                              "checkpoint": str(A1_PATH)},
+            "normalization": "softmax expected rating (1..10), then (expected_rating - 1) / 9",
+        },
+    }
+    formulas = {
+        "sharpness": {
+            "formula": "variance(default 3x3 Laplacian of RGB2GRAY uint8) / 1200, clipped [0,1]",
+            "model_revision": "numpy-opencv-compatible-rgb2gray15-laplacian-cv64f-v1",
+            "normalization": "population variance / 1200, clipped [0,1]",
+            "preprocessing": {**decoded_rgb, "input": "raw decoded uint8 RGB pixels",
+                              "grayscale": "OpenCV 15-bit fixed-point RGB2GRAY",
+                              "laplacian": "4-neighbor CV_64F, BORDER_REFLECT_101"},
+        },
+        "contrast": {
+            "formula": "(gray_p95 - gray_p5) / 220, clipped [0,1]",
+            "model_revision": "numpy-opencv-compatible-rgb2gray15-percentile-contrast-v1",
+            "normalization": "p95 minus p5 / 220, NumPy linear percentile, clipped [0,1]",
+            "preprocessing": {**decoded_rgb, "input": "raw decoded uint8 RGB pixels",
+                              "grayscale": "OpenCV 15-bit fixed-point RGB2GRAY",
+                              "percentile": "NumPy percentile method=linear on quantized uint8 gray"},
+        },
+        "colorfulness": {
+            "formula": "Hasler-Susstrunk opponent-color metric / 100, clipped [0,1]",
+            "model_revision": "numpy-hasler-susstrunk-rgb-float32-v1",
+            "normalization": "Hasler-Susstrunk metric / 100, clipped [0,1]",
+            "preprocessing": {**decoded_rgb, "input": "raw decoded uint8 RGB pixels",
+                              "working_dtype": "float32 RGB; no model input normalization"},
+        },
+    }
+    for name, descriptor in formulas.items():
+        descriptor["dtype"] = "float32"
+        descriptor["range"] = [0.0, 1.0]
+        descriptor["direction"] = "higher_is_better"
+        descriptor["checkpoint_sha256"] = hashlib.sha256(
+            json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        signal[name] = descriptor
+    return signal

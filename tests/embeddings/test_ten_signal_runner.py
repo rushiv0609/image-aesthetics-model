@@ -76,6 +76,21 @@ def test_runner_is_ordered_resumable_and_accounts_providers(tmp_path: Path):
     assert len(calls) == 30  # three ordered batches; providers are not called on resume
 
 
+def test_progress_records_host_wide_swap_baseline_and_delta(tmp_path, monkeypatch):
+    import image_aesthetics.embeddings.ten_signal_runner as runner_module
+    samples = iter((2.25, 2.75))
+    monkeypatch.setattr(runner_module, "_swap_gb", lambda: next(samples))
+    cfg = RunnerConfig(tmp_path / "cache", batch_size=1, progress_interval_seconds=60)
+    result = TenSignalRunner(cfg, providers(), prepare_fn=prepare).run(
+        items(tmp_path, 1), contract(), run_id="swap-metrics")
+    assert result["swap_scope"] == "host_wide"
+    assert result["swap_baseline_gb"] == 2.25
+    assert result["swap_used_gb"] == 2.75
+    assert result["swap_delta_gb"] == 0.5
+    progress = __import__("json").loads((cfg.cache_dir / "progress.json").read_text())
+    assert progress["swap_scope"] == "host_wide" and progress["swap_delta_gb"] == 0.5
+
+
 def test_provider_failure_is_explicit_and_not_fabricated(tmp_path: Path):
     cfg = RunnerConfig(tmp_path / "cache", batch_size=2, progress_interval_seconds=0.01)
     runner = TenSignalRunner(cfg, providers(fail="nima"), prepare_fn=prepare)

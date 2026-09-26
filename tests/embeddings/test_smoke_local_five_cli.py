@@ -16,6 +16,39 @@ def test_local_five_preflight_writes_full_contract_without_loading_models(tmp_pa
     assert report['image_root']==str(image_root.resolve()) and report['source_fingerprints_sha256']
 
 
+def test_local_five_active_contract_has_pinned_real_provenance():
+    root=Path(__file__).parents[2]
+    spec=importlib.util.spec_from_file_location('smoke_local_five_contract_test',root/'scripts/embeddings/smoke_local_five.py')
+    smoke=importlib.util.module_from_spec(spec); spec.loader.exec_module(smoke)
+    contract=smoke.contract()['features']
+    for name in smoke.LOCAL_FIVE:
+        value=contract[name]
+        assert value['dtype']=='float32' and value['range'] in ([-1,1],[0,1])
+        assert value['direction']=='higher_is_better'
+        assert value['model_revision'] and value['normalization']
+        assert value['preprocessing']
+        assert len(value['checkpoint_sha256'])==64
+        assert 'blocked' not in value['model_revision']
+        assert 'blocked' not in value['normalization']
+    assert contract['a1_siglip']['preprocessing']['input_signal']=='siglip_embedding'
+    assert contract['a1_siglip']['preprocessing']['input_normalization']=='L2 unit norm across 768 dimensions'
+    assert contract['a1_siglip']['preprocessing']['input_dtype']=='float32'
+    assert 'expected_rating' in contract['a1_siglip']['normalization']
+    siglip_pre=contract['siglip_embedding']['preprocessing']
+    assert siglip_pre['resize']=='aspect-preserving thumbnail' and siglip_pre['padding']=='black centered square canvas'
+    assert siglip_pre['model_normalization']=={
+        'transform':'float32(pixel) / 127.5 - 1.0',
+        'equivalent_mean':[0.5,0.5,0.5], 'equivalent_std':[0.5,0.5,0.5],
+        'input_range':[0,255], 'output_range':[-1.0,1.0]}
+    for name in ('sharpness','contrast','colorfulness'):
+        pre=contract[name]['preprocessing']
+        assert pre['input']=='raw decoded uint8 RGB pixels'
+        assert 'model_normalization' not in pre and 'mean' not in pre and 'std' not in pre
+    assert '15-bit fixed-point' in contract['sharpness']['preprocessing']['grayscale']
+    assert 'rgb2gray15' in contract['sharpness']['model_revision']
+    assert contract['sharpness']['normalization'].endswith('clipped [0,1]')
+
+
 def test_local_five_preflight_reuses_same_identity_and_rejects_changed_source(tmp_path):
     image_root=tmp_path/'images'; image_root.mkdir(); image=image_root/'a.jpg'; image.write_bytes(b'one'); stat=image.stat()
     source_hash=__import__('hashlib').sha256(b'one').hexdigest()
@@ -44,6 +77,8 @@ def test_successful_smoke_writes_resume_metrics_and_cli_artifacts_with_injected_
             calls.append(run_id)
             return {'run_id': run_id, 'state': 'completed', 'completed_images': 1,
                     'failed_images': 0, 'decode_seconds': .01, 'resident_memory_gb': .5,
+                    'swap_scope': 'host_wide', 'swap_baseline_gb': 1.0,
+                    'swap_used_gb': 1.25, 'swap_delta_gb': .25,
                     'provider_seconds': {'siglip_embedding': .02},
                     'provider_images': {'siglip_embedding': 1}, 'provider_failures': {}}
 
@@ -60,6 +95,7 @@ def test_successful_smoke_writes_resume_metrics_and_cli_artifacts_with_injected_
     metrics = json.loads((tmp_path/'out'/'metrics.json').read_text())
     assert metrics['initial_throughput_images_per_second'] > 0
     assert metrics['provider_seconds'] == {'siglip_embedding': .02}
+    assert metrics['swap_scope'] == 'host_wide' and metrics['swap_delta_gb'] == .25
     for name in ('initial-result.json', 'resume-result.json', 'status.json', 'failures.json', 'verify.json'):
         assert (tmp_path/'out'/name).exists()
 

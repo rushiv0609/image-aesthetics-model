@@ -148,18 +148,28 @@ class Ledger:
 
     def ensure_cache_identity(self, identity: str, manifest_sha256: str, contract_sha256: str,
                               item_count: int, ordered_ids_sha256: str,
-                              source_fingerprints_sha256: str = "") -> None:
+                              source_fingerprints_sha256: str = "", *,
+                              manifest_identity_kind: str = "",
+                              manifest_bytes_sha256: str = "",
+                              canonical_items_sha256: str = "") -> None:
         """Bind this cache directory to one immutable manifest and feature contract."""
         values = {"cache_identity": identity, "manifest_sha256": manifest_sha256,
                   "contract_sha256": contract_sha256, "item_count": str(item_count),
                   "ordered_ids_sha256": ordered_ids_sha256,
-                  "source_fingerprints_sha256": source_fingerprints_sha256}
+                  "source_fingerprints_sha256": source_fingerprints_sha256,
+                  "manifest_identity_kind": manifest_identity_kind,
+                  "manifest_bytes_sha256": manifest_bytes_sha256,
+                  "canonical_items_sha256": canonical_items_sha256}
         conn = sqlite3.connect(self.path, timeout=5)
         self._configure(conn)
         try:
             conn.execute("BEGIN IMMEDIATE")
             existing = dict(conn.execute("SELECT key,value FROM cache_metadata"))
-            if existing and existing != values:
+            # Safely enrich caches made before explicit manifest-kind metadata
+            # existed, while still rejecting any conflicting immutable value.
+            if existing and (set(existing) - set(values) or
+                             any(existing[key] != value for key, value in values.items()
+                                 if key in existing)):
                 raise ValueError("cache identity differs from the immutable manifest or feature contract; use a new cache directory")
             for key, value in values.items():
                 conn.execute("INSERT OR IGNORE INTO cache_metadata(key,value) VALUES(?,?)", (key, value))

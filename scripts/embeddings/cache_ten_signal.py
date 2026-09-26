@@ -14,6 +14,7 @@ from image_aesthetics.embeddings.ledger import Ledger
 from image_aesthetics.embeddings.preprocess import load_manifest as load_items
 from image_aesthetics.embeddings.shards import read_shard, verify_shard
 from image_aesthetics.embeddings.ten_signal_runner import (RunnerConfig, TenSignalRunner,
+                                                             canonical_items_sha256,
                                                              source_fingerprints_sha256)
 
 
@@ -68,11 +69,33 @@ def _verify(cache_dir: Path, ledger: Ledger, args) -> tuple[dict, bool]:
         else:
             try:
                 load_manifest(args.manifest, args.image_root)
-                if manifest_sha256(args.manifest) != metadata.get("manifest_sha256"):
-                    errors.append({"type": "manifest_identity_mismatch"})
                 items = load_items(args.manifest, image_root=args.image_root)
                 manifest_coordinates = {item.manifest_position: item.image_id for item in items}
                 items = TenSignalRunner._fingerprint_sources(items)
+                raw_manifest_hash = manifest_sha256(args.manifest)
+                item_identity_hash = canonical_items_sha256(items)
+                identity_kind = metadata.get("manifest_identity_kind")
+                if identity_kind == "bytes":
+                    expected_manifest = metadata.get("manifest_bytes_sha256") or metadata.get("manifest_sha256")
+                    manifest_matches = raw_manifest_hash == expected_manifest
+                elif identity_kind == "canonical_items":
+                    manifest_matches = item_identity_hash == metadata.get("canonical_items_sha256", metadata.get("manifest_sha256"))
+                else:
+                    # Compatibility for immutable caches created before the
+                    # identity kind was persisted. Compare each representation
+                    # only against the stored digest; never normalize inputs.
+                    manifest_matches = (raw_manifest_hash == metadata.get("manifest_sha256") or
+                                        item_identity_hash == metadata.get("manifest_sha256"))
+                if not manifest_matches:
+                    errors.append({"type": "manifest_identity_mismatch"})
+                if metadata.get("canonical_items_sha256") and item_identity_hash != metadata["canonical_items_sha256"]:
+                    errors.append({"type": "canonical_items_mismatch"})
+                ordered_ids_hash = hashlib.sha256(json.dumps(
+                    [item.image_id for item in items], separators=(",", ":")).encode()).hexdigest()
+                if metadata.get("ordered_ids_sha256") and ordered_ids_hash != metadata["ordered_ids_sha256"]:
+                    errors.append({"type": "ordered_ids_mismatch"})
+                if metadata.get("item_count") and len(items) != int(metadata["item_count"]):
+                    errors.append({"type": "item_count_mismatch"})
                 fingerprints_hash = source_fingerprints_sha256(items)
                 if fingerprints_hash != metadata.get("source_fingerprints_sha256"):
                     errors.append({"type": "source_fingerprint_mismatch"})
