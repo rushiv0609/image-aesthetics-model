@@ -26,7 +26,7 @@ def test_pipeline_preserves_order_and_resumes_completed_rows(tmp_path: Path):
     def backend(images):
         output = np.zeros((len(images), 768), dtype=np.float32)
         for row, image in enumerate(images):
-            output[row] = float(image[0, 0, 0] + 1)
+            output[row, 0] = 1.0
         return output
 
     class Embedder:

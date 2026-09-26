@@ -64,6 +64,7 @@ def test_multi_file_manifest_is_deterministic_and_verifiable(tmp_path):
             (first, "https://example.test/part-1.zip"),
         ],
         source="research-mirror",
+        transfer_metadata={"http": {"status": 200, "accept_ranges": "bytes"}},
     )
     payload = json.loads(manifest.read_text())
     assert payload["manifest_version"] == 2
@@ -71,6 +72,7 @@ def test_multi_file_manifest_is_deterministic_and_verifiable(tmp_path):
         "downloads/part-1.zip",
         "downloads/part-2.zip",
     ]
+    assert payload["transfer_metadata"]["http"]["accept_ranges"] == "bytes"
     assert verify(tmp_path) == (True, "verified 2 file(s)")
     second.write_bytes(b"corrupt")
     assert verify(tmp_path) == (False, "size mismatch: downloads/part-2.zip")

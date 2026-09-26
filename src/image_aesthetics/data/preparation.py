@@ -57,24 +57,42 @@ def _index_images(root: Path) -> dict[str, list[Path]]:
 
 
 def _resolve(sample: CanonicalSample, root: Path, index: dict[str, list[Path]]) -> tuple[Path | None, str | None]:
-    direct = root / sample.image_name
+    requested = Path(sample.image_name)
+    if requested.is_absolute() or ".." in requested.parts:
+        return None, "unsafe_image_path"
+    direct = root / requested
     if direct.is_file():
-        return direct, None
-    candidates = index.get(Path(sample.image_name).name, [])
+        candidates = [direct]
+    else:
+        candidates = index.get(requested.name, [])
     if len(candidates) == 1:
-        return candidates[0], None
+        candidate = candidates[0]
+        if any(part.is_symlink() for part in (root, *candidate.parents, candidate)):
+            return None, "symlink_image_path"
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return None, "image_path_outside_root"
+        if not resolved.is_file():
+            return None, "missing_image"
+        return resolved, None
     if not candidates:
         return None, "missing_image"
     return None, "ambiguous_image_name"
 
 
-def prepare_dataset(adapter: DatasetAdapter, *, image_root: Path, output_root: Path, source_files: Iterable[Path] = ()) -> dict:
+def prepare_dataset(adapter: DatasetAdapter, *, image_root: Path, output_root: Path,
+                    source_files: Iterable[Path] = (),
+                    source_inventory: dict | None = None) -> dict:
     """Materialize one adapter into samples/rejected/audit/source-manifest.
 
     Paths are intentionally absent from sample records; only relative source names,
     hashes, and structural metadata are persisted.
     """
-    image_root = Path(image_root)
+    image_root = Path(image_root).resolve(strict=True)
+    if not image_root.is_dir():
+        raise ValueError("image_root must be a directory")
     output_root = Path(output_root)
     if output_root.exists():
         raise FileExistsError(f"prepared snapshot already exists: {output_root}")
@@ -101,8 +119,13 @@ def prepare_dataset(adapter: DatasetAdapter, *, image_root: Path, output_root: P
         except (OSError, UnidentifiedImageError, ValueError) as exc:
             rejected.append({"dataset_id": item.dataset_id, "image_id": item.image_id, "image_name": item.image_name, "reason": "decode_failed", "error_type": type(exc).__name__})
             continue
+        stat = path.stat()
         record = asdict(item)
-        record.update({"schema_version": SCHEMA_VERSION, "sha256": digest, "width": width, "height": height, "format": image_format, "decode_status": "ok"})
+        record.update({"schema_version": SCHEMA_VERSION, "source_path": path.relative_to(image_root).as_posix(),
+                       "source_size": stat.st_size, "source_mtime_ns": stat.st_mtime_ns,
+                       "source_fingerprint": digest, "sha256": digest, "width": width, "height": height,
+                       "format": image_format, "decode_status": "ok"})
+        record["image_id"] = f"{item.dataset_id}:{item.image_id}"
         record["native_score_range"] = list(item.native_score_range)
         accepted.append(record)
     accepted.sort(key=lambda row: (row["dataset_id"], row["image_id"]))
@@ -115,6 +138,8 @@ def prepare_dataset(adapter: DatasetAdapter, *, image_root: Path, output_root: P
             if source.exists() and source.is_file():
                 source_manifest["annotation_files"].append({"name": source.name, "sha256": _sha256(source), "size": source.stat().st_size})
         audit = {"schema_version": SCHEMA_VERSION, "dataset_id": adapter.dataset_id, "accepted": len(accepted), "rejected": len(rejected), "rejection_reasons": {reason: sum(1 for row in rejected if row["reason"] == reason) for reason in sorted({row["reason"] for row in rejected})}, "source_manifest": "source-manifest.json"}
+        if source_inventory is not None:
+            audit["source_inventory"] = source_inventory
         _atomic_json(staging / "audit.json", audit)
         _atomic_json(staging / "source-manifest.json", source_manifest)
         os.replace(staging, output_root)

@@ -33,16 +33,17 @@ class SigLIP2Embedder:
         output = self._backend(images)
         try:
             import numpy as np  # type: ignore
-            output = np.asarray(output, dtype=np.float32)
+            output = np.asarray(output)
+            if output.dtype != np.dtype("float32"):
+                raise ValueError(f"SigLIP2 output must be float32, got {output.dtype}")
             if output.ndim != 2 or output.shape[1] != 768:
                 raise ValueError(f"SigLIP2 output must have shape (N,768), got {output.shape}")
             if not np.isfinite(output).all():
                 raise ValueError("SigLIP2 output contains NaN/Inf")
-            norms = np.linalg.norm(output, axis=1, keepdims=True)
-            if np.any(norms == 0):
-                raise ValueError("SigLIP2 output contains a zero vector")
-            output = output / norms
-            return output.astype(np.float32, copy=False)
+            norms = np.linalg.norm(output, axis=1)
+            if np.any(norms < 1e-6) or not np.allclose(norms, 1.0, atol=5e-3):
+                raise ValueError("SigLIP2 output must be nonzero and unit-normalized")
+            return output
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("numpy is required for embedding validation") from exc
 

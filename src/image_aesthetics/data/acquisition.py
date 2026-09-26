@@ -64,6 +64,7 @@ def write_multi_manifest(
     files: list[tuple[Path, str]],
     source: str,
     user_supplied: bool = False,
+    transfer_metadata: dict[str, object] | None = None,
 ) -> Path:
     """Record a complete multi-file download as one immutable snapshot."""
     if not files:
@@ -84,6 +85,11 @@ def write_multi_manifest(
         "redistribution": "prohibited",
         "platform": platform.platform(),
     }
+    if transfer_metadata is not None:
+        # Immutable provenance for completed transfers (for example, the
+        # final HTTP response range/length/ETag).  It is intentionally outside
+        # individual file records so verification remains schema-compatible.
+        payload["transfer_metadata"] = transfer_metadata
     return _write_immutable_manifest(dataset_root, payload)
 
 def verify(dataset_root: Path) -> tuple[bool, str]:

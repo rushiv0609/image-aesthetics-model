@@ -1,6 +1,6 @@
 from pathlib import Path
 from PIL import Image
-from image_aesthetics.data.fusion_preparation import group_exact, near_duplicate_candidates, assign_global_folds
+from image_aesthetics.data.fusion_preparation import group_exact, near_duplicate_candidates, assign_global_folds, prepare_fusion
 
 def row(dataset, image, sha, score):
     return {"dataset_id": dataset, "image_id": image, "image_name": image, "record_id": f"{dataset}:{image}", "sha256": sha, "native_score": score}
@@ -28,3 +28,12 @@ def test_fold_assignment_is_deterministic_and_populates_all_folds():
     first=assign_global_folds(records,groups,folds=5,seed=7)
     second=assign_global_folds(records,groups,folds=5,seed=7)
     assert first==second and set(first.values())==set(range(5))
+
+
+def test_technical_and_ava_rows_never_become_aesthetic_fusion_targets():
+    records=[row("tad66k","a","a",".8"),
+             {**row("spaq","s","s",".9"),"eligible_as_aesthetic_target":False,"label_task":"technical"},
+             {**row("koniq10k","k","k",".7"),"eligible_as_aesthetic_target":False,"label_task":"technical"},
+             {**row("ava","v","v",".6"),"eligible_as_aesthetic_target":False}]
+    fused,_=prepare_fusion(records,{"tad66k":Path("/nonexistent")},folds=2,seed=3)
+    assert [record["dataset_id"] for record in fused]==["tad66k"]

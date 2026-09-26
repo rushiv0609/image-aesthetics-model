@@ -128,6 +128,9 @@ class Ledger:
                 min_position INTEGER NOT NULL, max_position INTEGER NOT NULL,
                 committed_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS cache_metadata (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_items_state ON items(state);
             CREATE INDEX IF NOT EXISTS idx_items_shard ON items(shard_id);
             CREATE INDEX IF NOT EXISTS idx_items_retry ON items(state, attempts);
@@ -142,6 +145,39 @@ class Ledger:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
+
+    def ensure_cache_identity(self, identity: str, manifest_sha256: str, contract_sha256: str,
+                              item_count: int, ordered_ids_sha256: str,
+                              source_fingerprints_sha256: str = "") -> None:
+        """Bind this cache directory to one immutable manifest and feature contract."""
+        values = {"cache_identity": identity, "manifest_sha256": manifest_sha256,
+                  "contract_sha256": contract_sha256, "item_count": str(item_count),
+                  "ordered_ids_sha256": ordered_ids_sha256,
+                  "source_fingerprints_sha256": source_fingerprints_sha256}
+        conn = sqlite3.connect(self.path, timeout=5)
+        self._configure(conn)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = dict(conn.execute("SELECT key,value FROM cache_metadata"))
+            if existing and existing != values:
+                raise ValueError("cache identity differs from the immutable manifest or feature contract; use a new cache directory")
+            for key, value in values.items():
+                conn.execute("INSERT OR IGNORE INTO cache_metadata(key,value) VALUES(?,?)", (key, value))
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def cache_identity(self) -> str:
+        rows = self.read("SELECT value FROM cache_metadata WHERE key='cache_identity'")
+        if not rows:
+            raise ValueError("cache identity is not bound")
+        return str(rows[0][0])
+
+    def cache_metadata(self) -> dict[str, str]:
+        return dict(self.read("SELECT key,value FROM cache_metadata"))
 
     def seed_items(self, items: list[dict[str, Any]], allow_source_update: bool = False) -> None:
         """Insert manifest rows and invalidate rows whose source identity changed."""
@@ -367,6 +403,17 @@ class Ledger:
         rows = self.read(f"SELECT image_id,manifest_position,source_path,source_size,source_mtime_ns,source_fingerprint,state,attempts FROM items WHERE (state IN {states}) AND attempts < ? ORDER BY manifest_position", (max_attempts,))
         keys = ("image_id", "manifest_position", "source_path", "source_size", "source_mtime_ns", "source_fingerprint", "state", "attempts")
         return [dict(zip(keys, row)) for row in rows]
+
+    def repair_exhausted_attempts(self, max_attempts: int = 3) -> int:
+        """Make failed/pending rows eligible for an explicit new repair run."""
+        conn = sqlite3.connect(self.path, timeout=5)
+        self._configure(conn)
+        try:
+            cursor = conn.execute("UPDATE items SET attempts=0,state='pending',error_type=NULL,error_message=NULL,finished_at=NULL,updated_at=? WHERE state IN ('pending','retryable_error') AND attempts>=?", (utc_now(), max_attempts))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
 
     def counts(self) -> dict[str, int]:
         return {row[0]: row[1] for row in self.read("SELECT state,COUNT(*) FROM items GROUP BY state")}

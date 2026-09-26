@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from image_aesthetics.embeddings.ledger import Ledger
 from image_aesthetics.embeddings.shards import write_atomic
-from image_aesthetics.embeddings.feature_contract import FEATURES, DIMENSIONS
+from image_aesthetics.embeddings.feature_contract import FEATURES, DIMENSIONS, cache_identity
 
 ROOT = Path(__file__).parents[2]
 
@@ -17,7 +17,8 @@ def run(*args):
     return subprocess.run([sys.executable, *args], cwd=ROOT, env=env, capture_output=True, text=True)
 
 def cli(command, cache):
-    result = run("scripts/embeddings/cache_ten_signal.py", command, "--cache-dir", str(cache))
+    extra = ["--allow-partial-diagnostics"] if command == "verify" else []
+    result = run("scripts/embeddings/cache_ten_signal.py", command, "--cache-dir", str(cache), *extra)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
@@ -26,10 +27,21 @@ def seed_cache(tmp_path, *, shard=True):
     ledger = Ledger(cache / "work.sqlite3"); ledger.open()
     source = tmp_path / "a.jpg"; source.write_bytes(b"image")
     ledger.seed_items([{"image_id": "a", "manifest_position": 0, "source_path": str(source), "source_size": source.stat().st_size, "source_mtime_ns": source.stat().st_mtime_ns, "source_fingerprint": "source-a"}])
+    contract_value=spec()
+    manifest_hash="1"*64
+    identity=cache_identity(manifest_hash,contract_value)
+    ordered_hash=hashlib.sha256(json.dumps(["a"],separators=(",",":")).encode()).hexdigest()
+    fingerprints_hash=hashlib.sha256(json.dumps([["a",0,"source-a"]],separators=(",",":")).encode()).hexdigest()
+    ledger.ensure_cache_identity(identity,manifest_hash,hashlib.sha256(json.dumps(contract_value,sort_keys=True,separators=(",",":")).encode()).hexdigest(),1,ordered_hash,fingerprints_hash)
     shard_path = cache / "shard-00000.safetensors"
     if shard:
-        values = np.ones((1, 768), dtype=np.float32); values /= np.linalg.norm(values, axis=1, keepdims=True)
-        checksum, _ = write_atomic(shard_path, values, [0], ["a"])
+        values = np.zeros((1, 1544), dtype=np.float32); values[0,0]=1.; values[0,768]=1.
+        checksum, _ = write_atomic(shard_path, values, [0], ["a"], metadata_extra={
+            "unit_norm":False,"signal_names":list(FEATURES),
+            "signal_dimensions":{n:DIMENSIONS.get(n,1) for n in FEATURES},
+            "signal_specs":contract_value["features"],"cache_identity":identity,
+            "source_fingerprints_sha256":fingerprints_hash,"manifest_sha256":manifest_hash,
+            "ordered_ids_sha256":ordered_hash,"item_count":"1"})
         ledger.start_run("run", model_revision="r1", preprocessing_hash="p", dataset_fingerprint="d", cache_schema_version=1, config={})
         ledger.start_writer()
         ledger.emit("commit_shard", wait=True, shard_id=0, path=str(shard_path), row_count=1, sha256=checksum, min_position=0, max_position=0, items=[{"image_id": "a", "position": 0, "checksum": hashlib.sha256(values[0].tobytes()).hexdigest()}])
@@ -78,7 +90,9 @@ def test_verify_orphan_shard(tmp_path):
     cache, _, _ = seed_cache(tmp_path, shard=False)
     values = np.ones((1, 768), dtype=np.float32); values /= np.linalg.norm(values, axis=1, keepdims=True)
     write_atomic(cache / "shard-00007.safetensors", values, [7], ["orphan"])
-    assert cli("verify", cache)["errors"] == [{"type": "orphan_shard", "shard": "shard-00007.safetensors"}]
+    errors=cli("verify", cache)["errors"]
+    assert "orphan_shard" in {e["type"] for e in errors}
+    assert "incomplete_rows" in {e["type"] for e in errors}
 
 def test_verify_corrupt_shard(tmp_path):
     cache, _, shard = seed_cache(tmp_path); shard.write_bytes(shard.read_bytes() + b"corrupt")
@@ -88,10 +102,16 @@ def test_verify_corrupt_shard(tmp_path):
 def test_verify_checksum_mismatch_and_out_of_bounds(tmp_path):
     cache, _, _ = seed_cache(tmp_path)
     conn = sqlite3.connect(cache / "work.sqlite3"); conn.execute("UPDATE shards SET sha256=?", ("f" * 64,)); conn.execute("UPDATE items SET shard_row=4"); conn.commit(); conn.close()
-    assert {e["type"] for e in cli("verify", cache)["errors"]} == {"checksum_mismatch", "row_out_of_range"}
+    assert {"checksum_mismatch", "row_out_of_range", "unexpected_shard_row"} <= {e["type"] for e in cli("verify", cache)["errors"]}
 
 def test_verify_coordinate_mismatch(tmp_path):
     cache, _, shard = seed_cache(tmp_path)
     metadata = shard.with_suffix(shard.suffix + ".json"); payload = json.loads(metadata.read_text()); payload["image_ids"] = ["different"]; metadata.write_text(json.dumps(payload, sort_keys=True))
     errors = cli("verify", cache)["errors"]
     assert any(e["type"] == "coordinate_mismatch" for e in errors)
+
+def test_verify_errors_exit_nonzero_without_diagnostic_flag(tmp_path):
+    cache, _, shard = seed_cache(tmp_path); shard.unlink()
+    result = run("scripts/embeddings/cache_ten_signal.py", "verify", "--cache-dir", str(cache))
+    assert result.returncode != 0
+    assert "missing_shard" in {e["type"] for e in json.loads(result.stdout)["errors"]}

@@ -47,18 +47,24 @@ def _item_from_record(record: dict[str, Any], position: int, base: Path | None) 
     else:
         size, mtime_ns = 0, 0
     image_id = str(record.get("image_id", record.get("id", path.stem)))
-    return ManifestItem(image_id, str(path), position, size, mtime_ns,
-                        str(record["source_fingerprint"]) if record.get("source_fingerprint") else None)
+    fingerprints = [str(record[key]) for key in ("source_fingerprint", "sha256", "source_sha256")
+                    if record.get(key) not in (None, "")]
+    if len(set(fingerprints)) > 1:
+        raise ValueError(f"conflicting source fingerprint fields for {image_id}")
+    fingerprint = fingerprints[0] if fingerprints else None
+    if fingerprint is None and path.is_file():
+        fingerprint = source_fingerprint(path, content_hash=True)
+    return ManifestItem(image_id, str(path), position, size, mtime_ns, fingerprint)
 
 
-def load_manifest(path: Path) -> list[ManifestItem]:
+def load_manifest(path: Path, *, image_root: Path | None = None) -> list[ManifestItem]:
     """Load JSON/JSONL/CSV manifests in deterministic position order.
 
     Parquet manifests are intentionally not read implicitly: requiring an
     explicit conversion/pyarrow dependency avoids silently changing row order.
     """
     path = Path(path)
-    base = path.parent
+    base = Path(image_root).resolve(strict=True) if image_root is not None else path.parent
     records: list[dict[str, Any]]
     if path.suffix.lower() in {".jsonl", ".ndjson"}:
         records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -70,7 +76,29 @@ def load_manifest(path: Path) -> list[ManifestItem]:
             records = list(csv.DictReader(handle))
     else:
         raise ValueError(f"unsupported manifest format: {path.suffix}; use JSONL, JSON, or CSV")
-    items = [_item_from_record(record, idx, base) for idx, record in enumerate(records)]
+    items = []
+    for idx, record in enumerate(records):
+        item = _item_from_record(record, idx, base)
+        if image_root is not None:
+            raw = Path(str(record.get("source_path", record.get("path", ""))))
+            if not str(raw) or raw.is_absolute() or ".." in raw.parts:
+                raise ValueError("manifest source_path must be a safe relative path")
+            candidate = base / raw
+            current = base
+            for part in raw.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError(f"symlink manifest path: {raw.as_posix()}")
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(base)
+            except (OSError, ValueError):
+                raise ValueError(f"unsafe or missing manifest path: {raw.as_posix()}") from None
+            if not resolved.is_file():
+                raise ValueError(f"unsafe or missing manifest path: {raw.as_posix()}")
+            item = ManifestItem(item.image_id, str(resolved), item.manifest_position,
+                                item.source_size, item.source_mtime_ns, item.source_fingerprint)
+        items.append(item)
     if len({item.image_id for item in items}) != len(items):
         raise ValueError("manifest contains duplicate image_id values")
     return items
@@ -85,7 +113,7 @@ def preprocessing_contract(image_size: int = 224) -> dict[str, Any]:
         "color": "RGB",
         "interpolation": "lanczos",
         "normalization": {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]},
-        "decoder_preference": ["macos_imageio", "pillow"],
+        "decoder": "pillow",
     }
 
 
@@ -139,14 +167,8 @@ def _prepare_with_macos_imageio(path: Path, image_size: int) -> Any:
 
 
 def prepare_image(path: Path, image_size: int = 224) -> tuple[Any, str]:
-    """Decode, orient, RGB-convert, fit, and pad an image as uint8 HWC."""
+    """Decode through the single contract backend, orient, fit, and pad RGB HWC."""
     try:
-        return _prepare_with_macos_imageio(path, image_size), "macos_imageio"
-    except (ImportError, ModuleNotFoundError, AttributeError, TypeError, ValueError, OSError):
-        pass
-    try:
-        # A native ImageIO implementation can be added without changing the
-        # contract. Pillow remains the portable fallback and is recorded.
         from PIL import Image, ImageOps  # type: ignore
     except ImportError as exc:
         raise RuntimeError("Pillow is required for image decoding") from exc

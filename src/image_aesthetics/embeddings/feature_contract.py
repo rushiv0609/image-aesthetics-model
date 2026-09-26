@@ -30,15 +30,22 @@ def validate_features(features: dict) -> None:
 def manifest_sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-def cache_identity(input_manifest_sha256: str, contract: dict) -> str:
+def cache_identity(input_manifest_sha256: str, contract: dict,
+                   source_fingerprints_sha256: str | None = None) -> str:
     if len(input_manifest_sha256) != 64 or any(c not in "0123456789abcdef" for c in input_manifest_sha256.lower()): raise ValueError("invalid manifest SHA-256")
     validate_features(contract["features"])
-    payload = {"schema_version": SCHEMA_VERSION, "input_manifest_sha256": input_manifest_sha256, "contract": contract}
+    if source_fingerprints_sha256 is not None and (len(source_fingerprints_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_fingerprints_sha256.lower())):
+        raise ValueError("invalid source fingerprints SHA-256")
+    payload = {"schema_version": SCHEMA_VERSION, "input_manifest_sha256": input_manifest_sha256,
+               "source_fingerprints_sha256": source_fingerprints_sha256, "contract": contract}
     return sha256_bytes(canonical_json(payload).encode())
 
-def write_contract(path: Path, *, input_manifest_sha256: str, contract: dict) -> str:
-    identity = cache_identity(input_manifest_sha256, contract)
-    payload = {"schema_version": SCHEMA_VERSION, "cache_identity": identity, "input_manifest_sha256": input_manifest_sha256, "contract": contract}
+def write_contract(path: Path, *, input_manifest_sha256: str, contract: dict,
+                   source_fingerprints_sha256: str | None = None) -> str:
+    identity = cache_identity(input_manifest_sha256, contract, source_fingerprints_sha256)
+    payload = {"schema_version": SCHEMA_VERSION, "cache_identity": identity,
+               "input_manifest_sha256": input_manifest_sha256,
+               "source_fingerprints_sha256": source_fingerprints_sha256, "contract": contract}
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode()
     if path.exists():
@@ -60,19 +67,27 @@ def validate_relative_manifest(rows: list[dict]) -> None:
         if row["image_id"] in ids: raise ValueError("duplicate image_id")
         ids.add(row["image_id"])
         source = str(row.get("source_path", ""))
-        if Path(source).is_absolute() or ".." in Path(source).parts: raise ValueError("manifest source_path must be relative")
+        parsed = Path(source)
+        if not source or parsed.is_absolute() or ".." in parsed.parts or "" in parsed.parts:
+            raise ValueError("manifest source_path must be a non-empty safe relative path")
 
 def load_manifest(path: Path, root: Path) -> list[dict]:
     rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
     validate_relative_manifest(rows)
-    base = Path(root).resolve()
+    base = Path(root).resolve(strict=True)
+    if not base.is_dir(): raise ValueError("image root must be a directory")
     for row in rows:
         candidate = base / row["source_path"]
         current = base
-        if any(part.is_symlink() for part in [current, *candidate.relative_to(base).parents, candidate]):
-            raise ValueError(f"symlink manifest path: {row['source_path']}")
-        resolved = candidate.resolve()
-        if base not in resolved.parents or not resolved.is_file():
+        for part in Path(row["source_path"]).parts:
+            current = current / part
+            if current.is_symlink(): raise ValueError(f"symlink manifest path: {row['source_path']}")
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(base)
+        except (OSError, ValueError):
+            raise ValueError(f"unsafe or missing manifest path: {row['source_path']}") from None
+        if not resolved.is_file():
             raise ValueError(f"unsafe or missing manifest path: {row['source_path']}")
     return rows
 
@@ -80,5 +95,5 @@ def load_contract(path: Path) -> dict:
     payload = json.loads(Path(path).read_text())
     if payload.get("schema_version") != SCHEMA_VERSION: raise ValueError("unsupported contract schema")
     validate_features(payload["contract"]["features"])
-    if payload.get("cache_identity") != cache_identity(payload["input_manifest_sha256"], payload["contract"]): raise ValueError("cache identity mismatch")
+    if payload.get("cache_identity") != cache_identity(payload["input_manifest_sha256"], payload["contract"], payload.get("source_fingerprints_sha256")): raise ValueError("cache identity mismatch")
     return payload

@@ -263,3 +263,61 @@ class SPAQAdapter(DatasetAdapter):
                 rejected += 1
                 reasons[item[1]] = reasons.get(item[1], 0) + 1
         return DatasetAudit(self.dataset_id, self._files, accepted, rejected, reasons)
+
+
+class KonIQ10KAdapter(DatasetAdapter):
+    """Read the official KonIQ-10k score table without inferring indicator joins.
+
+    The separately published indicator table has an ``image_id`` with no
+    filename join key in the score CSV.  It is retained as source provenance,
+    but must not be positional-joined to labels or features.
+    """
+
+    dataset_id = "koniq10k"
+
+    def __init__(self, scores_csv: Path):
+        self.scores_csv = Path(scores_csv)
+
+    def iter_samples(self, include_rejections: bool = False) -> Iterator[CanonicalSample | tuple[str, str]]:
+        required = {"image_name", "MOS", "SD", "MOS_zscore", "c_total", "c1", "c2", "c3", "c4", "c5"}
+        seen: set[str] = set()
+        with self.scores_csv.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+                if include_rejections:
+                    yield self.scores_csv.name, "invalid score columns"
+                return
+            for row_number, row in enumerate(reader, 2):
+                image = (row.get("image_name") or "").strip()
+                score, deviation, zscore, total = (_finite(row.get(name)) for name in ("MOS", "SD", "MOS_zscore", "c_total"))
+                if not image:
+                    if include_rejections: yield f"{self.scores_csv.name}:{row_number}", "missing image name"
+                    continue
+                if image in seen:
+                    if include_rejections: yield image, "duplicate image name"
+                    continue
+                seen.add(image)
+                if score is None or not 1.0 <= score <= 5.0:
+                    if include_rejections: yield image, "MOS outside 1-5"
+                    continue
+                if deviation is None or zscore is None or total is None or total <= 0:
+                    if include_rejections: yield image, "invalid rating metadata"
+                    continue
+                yield CanonicalSample(
+                    dataset_id=self.dataset_id, image_id=Path(image).stem, image_name=image,
+                    native_score=score, native_score_range=(1.0, 5.0),
+                    attributes={"rating_standard_deviation": deviation, "rating_count": total},
+                    source_groups=(f"koniq10k:image:{Path(image).stem}",),
+                    metadata={"native_label": score, "mos_zscore": zscore,
+                              "rating_distribution": {key: int(float(row[key])) for key in ("c1", "c2", "c3", "c4", "c5")}},
+                )
+
+    def inventory(self) -> DatasetAudit:
+        accepted = rejected = 0
+        reasons: dict[str, int] = {}
+        for item in self.iter_samples(include_rejections=True):
+            if isinstance(item, CanonicalSample):
+                accepted += 1
+            else:
+                rejected += 1; reasons[item[1]] = reasons.get(item[1], 0) + 1
+        return DatasetAudit(self.dataset_id, (self.scores_csv.name,), accepted, rejected, reasons)

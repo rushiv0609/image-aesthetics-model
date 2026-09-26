@@ -179,6 +179,15 @@ def assign_global_folds(records: list[dict], groups: dict[str, str], folds: int 
 
 
 def prepare_fusion(records: list[dict], image_roots: dict[str, Path], *, folds: int = 5, seed: int = 20260920) -> tuple[list[dict], list[dict]]:
+    # The aesthetic fusion target must not absorb technical-quality datasets or
+    # AVA labels exposed during the separate SigLIP-head development phase.
+    # Technical rows remain available to their dedicated auxiliary/evaluation
+    # workflows; they simply do not receive aesthetic folds here.
+    records = [row for row in records if bool(row.get(
+        "eligible_as_aesthetic_target",
+        str(row.get("dataset_id")) not in {"ava", "spaq", "koniq10k"}))]
+    if not records:
+        return [], []
     groups = group_exact(records)
     near = near_duplicate_candidates(records, image_roots)
     exact_group_count = len(set(groups.values()))

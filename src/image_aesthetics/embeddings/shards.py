@@ -53,6 +53,11 @@ def write_atomic(path: Path, embeddings: Any, positions: list[int], image_ids: l
     """
     np = _numpy()
     path.parent.mkdir(parents=True, exist_ok=True)
+    matrix = np.asarray(embeddings)
+    if matrix.dtype != np.dtype("float32"):
+        raise ValueError(f"shard embeddings must be float32, got {matrix.dtype}")
+    if matrix.ndim != 2 or matrix.shape[0] != len(positions) or len(positions) != len(image_ids):
+        raise ValueError("shard embeddings and coordinates have inconsistent shapes")
     metadata_path = path.with_suffix(path.suffix + ".json")
     if path.exists() or metadata_path.exists():
         raise FileExistsError(f"refusing to overwrite existing shard: {path}")
@@ -64,12 +69,12 @@ def write_atomic(path: Path, embeddings: Any, positions: list[int], image_ids: l
             from safetensors.numpy import save_file  # type: ignore
         except ImportError:
             with temporary.open("wb") as handle:
-                np.savez(handle, embeddings=np.asarray(embeddings, dtype=np.float32))
+                np.savez(handle, embeddings=matrix)
                 handle.flush()
                 os.fsync(handle.fileno())
             storage_format = "numpy_npz_compat"
         else:
-            save_file({"embeddings": np.asarray(embeddings, dtype=np.float32)}, str(temporary))
+            save_file({"embeddings": matrix}, str(temporary))
             with temporary.open("rb") as handle:
                 os.fsync(handle.fileno())
             storage_format = "safetensors"
@@ -78,7 +83,7 @@ def write_atomic(path: Path, embeddings: Any, positions: list[int], image_ids: l
             "schema_version": cache_schema_version,
             "storage_format": storage_format,
             "row_count": len(positions),
-            "embedding_dim": int(np.asarray(embeddings).shape[1]),
+            "embedding_dim": int(matrix.shape[1]),
             "positions": positions,
             "image_ids": image_ids,
             "sha256": checksum,
@@ -123,6 +128,8 @@ def read_shard(path: Path) -> tuple[Any, dict[str, Any]]:
             embeddings = loaded["embeddings"]
     if embeddings.ndim != 2 or embeddings.shape[0] != metadata["row_count"] or embeddings.shape[1] != metadata["embedding_dim"]:
         raise ValueError(f"invalid shard shape: {path}")
+    if embeddings.dtype != np.dtype("float32"):
+        raise ValueError(f"shard dtype must be float32: {path}")
     if len(metadata.get("positions", [])) != embeddings.shape[0] or len(metadata.get("image_ids", [])) != embeddings.shape[0]:
         raise ValueError(f"metadata row count mismatch: {path}")
     if not np.isfinite(embeddings).all():

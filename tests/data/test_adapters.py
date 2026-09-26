@@ -4,7 +4,7 @@ import io
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from image_aesthetics.data.adapters import CanonicalSample, SPAQAdapter, TAD66KAdapter
+from image_aesthetics.data.adapters import CanonicalSample, KonIQ10KAdapter, SPAQAdapter, TAD66KAdapter
 
 
 def test_tad66k_merges_splits_preserves_native_scale_and_rejects_bad_rows(tmp_path: Path):
@@ -83,3 +83,21 @@ def test_spaq_joins_mos_attributes_scenes_and_exif_without_openpyxl(tmp_path: Pa
     audit = adapter.inventory()
     assert audit.accepted == 1
     assert audit.rejection_reasons == {"MOS outside 0-100": 1}
+
+
+def test_koniq_adapter_keeps_score_rows_and_does_not_infer_indicator_join(tmp_path: Path):
+    scores = tmp_path / "koniq10k_scores_and_distributions.csv"
+    scores.write_text(
+        "image_name,c1,c2,c3,c4,c5,c_total,MOS,SD,MOS_zscore\n"
+        "one.jpg,1,2,3,4,5,15,3.5,0.5,72.1\n"
+        "bad.jpg,1,2,3,4,5,15,5.5,0.5,72.1\n"
+        "one.jpg,1,2,3,4,5,15,3.5,0.5,72.1\n"
+    )
+    adapter = KonIQ10KAdapter(scores)
+    samples = list(adapter.iter_samples())
+    assert len(samples) == 1
+    assert samples[0].image_id == "one"
+    assert samples[0].native_score_range == (1.0, 5.0)
+    assert samples[0].attributes == {"rating_standard_deviation": 0.5, "rating_count": 15.0}
+    assert samples[0].metadata["rating_distribution"] == {"c1": 1, "c2": 2, "c3": 3, "c4": 4, "c5": 5}
+    assert adapter.inventory().rejection_reasons == {"MOS outside 1-5": 1, "duplicate image name": 1}

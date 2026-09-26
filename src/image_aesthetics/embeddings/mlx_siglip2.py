@@ -18,15 +18,25 @@ def _load_dependencies():
         import torch
         from transformers import AutoModel
     except ImportError as exc:  # pragma: no cover - target Mac dependency
+        # MLX may raise ImportError while initializing Metal in a headless
+        # process even when every Python package is installed.  Preserve that
+        # operational cause rather than falsely diagnosing dependencies.
+        if "No Metal device available" in str(exc):
+            raise RuntimeError(f"MLX runtime unavailable: {exc}") from exc
         raise RuntimeError("MLX SigLIP2 extraction requires mlx, numpy, torch, and transformers") from exc
     return mx, nn, np, torch, AutoModel
+
+
+def _load_local_hf_model(auto_model: Any, model_id: str, revision: str):
+    """Resolve only the already-pinned local snapshot; never contact the Hub."""
+    return auto_model.from_pretrained(model_id, revision=revision, local_files_only=True)
 
 
 class _MLXModelFactory:
     def __init__(self, model_id: str, revision: str):
         mx, nn, np, torch, AutoModel = _load_dependencies()
         self.mx, self.nn, self.np = mx, nn, np
-        hf = AutoModel.from_pretrained(model_id, revision=revision)
+        hf = _load_local_hf_model(AutoModel, model_id, revision)
         cfg = getattr(hf.config, "vision_config", hf.config)
         self.image_size = int(getattr(cfg, "image_size", 224))
         patch = int(getattr(cfg, "patch_size", 16))
