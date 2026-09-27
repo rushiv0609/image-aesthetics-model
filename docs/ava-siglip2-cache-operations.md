@@ -25,6 +25,24 @@ Changed source metadata requires a new cache version (or an explicitly rebuilt
 manifest); embeddings from different model revisions or preprocessing contracts
 are never mixed.
 
+## Feature manifest validation
+
+`materialize_feature_manifest` emits `feature-manifest-v2`. Before a source is
+included, it is decoded through the same Pillow open, full-load, EXIF transpose,
+and RGB conversion path used by the ten-signal runtime. Pillow's tolerant
+truncated-image mode is rejected. Decode failures are excluded from
+`features.jsonl` and recorded with a `source_decode_invalid` reason in
+`rejected.jsonl`; the decode policy is recorded in `audit.json`. Resizing and
+model preprocessing are unchanged.
+
+A corrected manifest has a new manifest/cache identity. The resumable runner
+only retains committed rows when cache identity, manifest hash, source
+fingerprints, and shard row coordinates all match. It does not support
+transferring completed rows across a filtered or reordered manifest, even when
+most source images are unchanged. Do not relabel old shard metadata to make it
+appear to match a new identity; use the existing cache only with its original
+immutable manifest, or start a new cache for the corrected manifest.
+
 The default backend is the repository's standalone MLX FP16 SigLIP2 Base-224
 vision implementation. Install the optional `mlx` extra on the target Apple
 Silicon environment; tests can inject a deterministic backend without loading

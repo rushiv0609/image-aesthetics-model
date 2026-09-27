@@ -117,6 +117,35 @@ def preprocessing_contract(image_size: int = 224) -> dict[str, Any]:
     }
 
 
+class SourceDecodeError(ValueError):
+    """A source image could not be decoded with the runner's Pillow policy."""
+
+
+def _decode_rgb(path: Path):
+    """Apply the shared strict Pillow open, full-load, EXIF, and RGB policy."""
+    try:
+        from PIL import Image, ImageFile, ImageOps  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Pillow is required for image decoding") from exc
+    if ImageFile.LOAD_TRUNCATED_IMAGES:
+        raise SourceDecodeError("Pillow truncated-image decoding is enabled")
+    with Image.open(path) as source:
+        # Force decoding of every pixel before doing any transformations. This
+        # catches truncated files that might otherwise appear valid from headers.
+        source.load()
+        return ImageOps.exif_transpose(source).convert("RGB")
+
+
+def validate_image_decodable(path: Path) -> None:
+    """Validate using exactly the decoder and source conversion used at runtime."""
+    try:
+        _decode_rgb(Path(path))
+    except SourceDecodeError:
+        raise
+    except Exception as exc:
+        raise SourceDecodeError(f"Pillow decode failed ({type(exc).__name__})") from exc
+
+
 def _prepare_with_macos_imageio(path: Path, image_size: int) -> Any:
     """Decode through ImageIO/CoreGraphics when running on macOS.
 
@@ -169,15 +198,14 @@ def _prepare_with_macos_imageio(path: Path, image_size: int) -> Any:
 def prepare_image(path: Path, image_size: int = 224) -> tuple[Any, str]:
     """Decode through the single contract backend, orient, fit, and pad RGB HWC."""
     try:
-        from PIL import Image, ImageOps  # type: ignore
+        from PIL import Image  # type: ignore
     except ImportError as exc:
         raise RuntimeError("Pillow is required for image decoding") from exc
-    with Image.open(path) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
-        image.thumbnail((image_size, image_size), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (image_size, image_size), (0, 0, 0))
-        offset = ((image_size - image.width) // 2, (image_size - image.height) // 2)
-        canvas.paste(image, offset)
-        # ascontiguousarray is deliberately imported lazily with numpy.
-        import numpy as np  # type: ignore
-        return np.ascontiguousarray(canvas, dtype=np.uint8), "pillow"
+    image = _decode_rgb(path)
+    image.thumbnail((image_size, image_size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (image_size, image_size), (0, 0, 0))
+    offset = ((image_size - image.width) // 2, (image_size - image.height) // 2)
+    canvas.paste(image, offset)
+    # ascontiguousarray is deliberately imported lazily with numpy.
+    import numpy as np  # type: ignore
+    return np.ascontiguousarray(canvas, dtype=np.uint8), "pillow"

@@ -9,6 +9,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
+from image_aesthetics.embeddings.preprocess import validate_image_decodable
+
 DATASETS = ("ava", "tad66k", "spaq", "para", "flickr_aes", "koniq10k", "aadb")
 
 
@@ -158,6 +160,10 @@ def materialize_feature_manifest(dataset_id: str, prepared_root: Path, image_roo
                 raise ValueError("source_size_mismatch")
             if row.get("source_mtime_ns") is not None and int(row["source_mtime_ns"]) != stat.st_mtime_ns:
                 raise ValueError("source_mtime_mismatch")
+            try:
+                validate_image_decodable(path)
+            except ValueError as exc:
+                raise ValueError(f"source_decode_invalid: {exc}") from exc
             record = {
                 "dataset_id": dataset_id,
                 "image_id": qualified_id,
@@ -231,7 +237,7 @@ def materialize_feature_manifest(dataset_id: str, prepared_root: Path, image_roo
         _write_jsonl(staging / "rejected.jsonl", sorted(rejected, key=lambda row: (row["image_id"], row["reason"])))
         _write_jsonl(staging / "alias-split-conflicts.jsonl", sorted(alias_split_conflicts, key=lambda row: row["feature_id"]))
         audit = {
-            "schema_version": "feature-manifest-v1",
+            "schema_version": "feature-manifest-v2",
             "dataset_id": dataset_id,
             **layout,
             "feature_rows": len(feature_rows),
@@ -245,6 +251,7 @@ def materialize_feature_manifest(dataset_id: str, prepared_root: Path, image_roo
             "technical_diagnostic_rows": sum(row["training_role"] == "technical_diagnostic_only" for row in feature_rows),
             "flickr_duplicate_labels_preserved": dataset_id == "flickr_aes",
             "path_policy": "resolved relative paths; unsafe paths and hash mismatches rejected",
+            "decode_policy": "Pillow full load, EXIF transpose, RGB conversion; truncated images rejected",
         }
         (staging / "audit.json").write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(staging, output_root)
