@@ -60,12 +60,14 @@ class RunnerConfig:
     image_size: int = 224
     progress_interval_seconds: float = 5.0
     cache_schema_version: int = 1
+    max_new_images: int = 0
 
 
 @dataclass
 class _Decoded:
     item: ManifestItem
     image: Any = None
+    native_image: Any = None
     decoder: str | None = None
     error: BaseException | None = None
     elapsed: float = 0.0
@@ -264,7 +266,8 @@ class TenSignalRunner:
     def __init__(self, config: RunnerConfig,
                  provider_factories: Mapping[str, Callable[[], SignalProvider]] | None = None, *,
                  batch_extractor: Any | None = None,
-                 prepare_fn: Callable[[Path, int], tuple[Any, str]] = prepare_image):
+                 prepare_fn: Callable[[Path, int], tuple[Any, str]] = prepare_image,
+                 native_prepare_fn: Callable[[Path, int], tuple[Any, Any, str]] | None = None):
         self.config = config
         self.provider_factories = dict(provider_factories or {})
         self.batch_extractor = batch_extractor
@@ -272,6 +275,7 @@ class TenSignalRunner:
         if not self.feature_names or any(name not in FEATURES for name in self.feature_names):
             raise ValueError("batch extractor must declare a non-empty subset of fixed signals")
         self.prepare_fn = prepare_fn
+        self.native_prepare_fn = native_prepare_fn
         self.cancel = threading.Event()
         self._progress: _Progress | None = None
         self._providers: dict[str, SignalProvider] = {}
@@ -345,6 +349,10 @@ class TenSignalRunner:
             pending = ledger.pending_items(cfg.max_attempts, cfg.retry_permanent)
             by_id = {item.image_id: item for item in items}
             work = [by_id[row["image_id"]] for row in pending]
+            if cfg.max_new_images:
+                if cfg.max_new_images < 1:
+                    raise ValueError("max_new_images must be positive or zero for unlimited")
+                work = work[:cfg.max_new_images]
             self._pipeline(work, ledger, contract, self._next_shard_id(ledger))
             if self.cancel.is_set():
                 progress.state = "cancelled"
@@ -702,8 +710,12 @@ class TenSignalRunner:
                 while chunk := source.read(1024 * 1024): digest.update(chunk)
             if digest.hexdigest() != item.source_fingerprint:
                 raise ValueError(f"source bytes changed after manifest creation: {path}")
-        image, decoder = self.prepare_fn(path, self.config.image_size)
-        return _Decoded(item, image, decoder, elapsed=time.perf_counter() - started)
+        native_image = None
+        if self.native_prepare_fn is None:
+            image, decoder = self.prepare_fn(path, self.config.image_size)
+        else:
+            image, native_image, decoder = self.native_prepare_fn(path, self.config.image_size)
+        return _Decoded(item, image, native_image, decoder, elapsed=time.perf_counter() - started)
 
     def _infer_and_write(self, items: list[ManifestItem], decoded: queue.Queue, ledger: Ledger,
                          contract: dict[str, Any], first_shard: int,
@@ -794,7 +806,13 @@ class TenSignalRunner:
                 if self.batch_extractor is not None:
                     started = time.perf_counter(); memory_before = _memory_gb()
                     with metal_owner():
-                        values = self.batch_extractor.extract(images)
+                        if getattr(self.batch_extractor, "requires_native_images", False):
+                            if any(x.native_image is None for x in good):
+                                raise ValueError("provider requires native images but decoder omitted them")
+                            values = self.batch_extractor.extract(
+                                images, native_images=[x.native_image for x in good])
+                        else:
+                            values = self.batch_extractor.extract(images)
                     composite_elapsed = time.perf_counter() - started
                     stage_timings = getattr(self.batch_extractor, "last_timings", {})
                     for name in self.feature_names:
