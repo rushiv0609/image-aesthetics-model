@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from safetensors.numpy import save_file
+from torch.utils.data import DataLoader
 
 from image_aesthetics.data.fusion_training_dataset import DatasetBalancedBatchSampler, FusionTrainingDataset
 
@@ -28,7 +29,7 @@ def fixture(tmp_path: Path):
                            **{g: {"shard_id": 0, "row": i} for g in roots}})
             split_rows.append({"dataset_id": dataset_id, "image_id": image_id, "feature_id": image_id,
                                "native_score": i + 1, "native_score_range": [1, 5],
-                               "locked_test": i == 0, "development_fold": i % 5,
+                               "locked_test": i == 0, "development_fold": None if i == 0 else i % 5,
                                "group_id": f"group-{dataset_id}-{i}"})
         (join / "join.jsonl").write_text("".join(json.dumps(row) + "\n" for row in joined))
         join_dirs[dataset_id] = join
@@ -48,7 +49,10 @@ def test_locked_test_requires_explicit_opt_in(tmp_path):
     split, joins = fixture(tmp_path)
     with pytest.raises(PermissionError):
         FusionTrainingDataset(split, joins, partition="locked_test")
-    assert len(FusionTrainingDataset(split, joins, partition="locked_test", allow_locked_test=True)) == 2
+    dataset = FusionTrainingDataset(split, joins, partition="locked_test", allow_locked_test=True)
+    assert len(dataset) == 2
+    batch = next(iter(DataLoader(dataset, batch_size=2)))
+    assert batch["development_fold"].tolist() == [-1, -1]
 
 
 def test_balanced_batches_are_dataset_homogeneous(tmp_path):

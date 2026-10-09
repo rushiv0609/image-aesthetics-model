@@ -264,10 +264,11 @@ GPU starvation, decode rate, RSS, swap, failure rate, and end-to-end images/seco
 
 ### Current implementation status
 
-The frozen `fusion-prep-v4` snapshot now contains the four independent aesthetic
+The frozen `fusion-prep-v5` snapshot contains the four independent aesthetic
 targets: AADB, PARA, Flickr-AES, and TAD66K. It has 147,247 usable image-level
-records after quarantining unresolved near-duplicate candidates: 132,527
-development rows across five folds and 14,720 locked-test rows. AVA and KonIQ
+records after quarantining unresolved near-duplicate candidates. Dataset-native
+locked-test rows are preserved as a hard boundary before assigning five
+development folds; the audit records the resulting counts. AVA and KonIQ
 remain diagnostic-only; SPAQ remains a technical auxiliary and is not allowed to
 define the shared aesthetic target.
 
@@ -275,9 +276,8 @@ define the shared aesthetic target.
 `joined-ten-v1` indexes, prevents accidental locked-test access, and exposes a
 specific development fold as validation. `DatasetBalancedBatchSampler` emits
 dataset-homogeneous batches in equal dataset turns so TAD66K/Flickr-AES cannot
-silently dominate AADB/PARA. A real fold-0 smoke loaded 106,021 training,
-26,506 validation, and 14,720 locked-test rows and successfully collated finite
-32×1,544 batches.
+silently dominate AADB/PARA. Readiness validation must successfully collate
+finite 32×1,544 batches from every fold before training begins.
 
 ### Multi-dataset loader
 

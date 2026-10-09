@@ -37,3 +37,12 @@ def test_technical_and_ava_rows_never_become_aesthetic_fusion_targets():
              {**row("ava","v","v",".6"),"eligible_as_aesthetic_target":False}]
     fused,_=prepare_fusion(records,{"tad66k":Path("/nonexistent")},folds=2,seed=3)
     assert [record["dataset_id"] for record in fused]==["tad66k"]
+
+
+def test_upstream_locked_test_is_never_returned_to_development():
+    records = [{**row("tad66k", str(i), str(i), float(i)),
+                "upstream_locked_test": i == 7} for i in range(30)]
+    fused, _ = prepare_fusion(records, {"tad66k": Path("/nonexistent")}, folds=2, seed=3)
+    locked = {record["image_id"] for record in fused if record["locked_test"]}
+    assert "7" in locked
+    assert next(record for record in fused if record["image_id"] == "7")["development_fold"] is None

@@ -10,7 +10,7 @@ from typing import Iterable
 
 from PIL import Image, ImageOps
 
-VERSION = "fusion-prep-v4"
+VERSION = "fusion-prep-v5"
 
 
 def collapse_feature_labels(label_rows: list[dict], joined_rows: list[dict]) -> tuple[list[dict], dict]:
@@ -90,6 +90,7 @@ def collapse_feature_labels(label_rows: list[dict], joined_rows: list[dict]) -> 
             "themes": label.get("themes", []),
             "attributes": label.get("attributes", {}),
             "source_split": label.get("split"),
+            "upstream_locked_test": bool(joined.get("locked_test") or label.get("locked_test")),
             "raw_label_count": len(matches),
         })
     audit = {
@@ -311,8 +312,19 @@ def prepare_fusion(records: list[dict], image_roots: dict[str, Path], *, folds: 
     # across datasets are indivisible; deterministic hash order resolves ties.
     targets = {(d, b): round(sum(1 for r in records if r["dataset_id"] == d and bins[r["record_id"]] == b) * 0.1) for d in {r["dataset_id"] for r in records} for b in range(10)}
     selected = defaultdict(int)
-    locked_groups: set[str] = set()
+    # Official/native test rows are a hard boundary.  The deterministic quota
+    # selection below may add more groups, but can never return these to
+    # development training.
+    locked_groups: set[str] = {
+        group for group, members in grouped.items()
+        if any(bool(row.get("upstream_locked_test")) for row in members)
+    }
+    for group in locked_groups:
+        for row in grouped[group]:
+            selected[(row["dataset_id"], bins[row["record_id"]])] += 1
     for group in sorted(grouped, key=lambda g: (hashlib.sha256(f"test:{seed}:{g}".encode()).hexdigest(), g)):
+        if group in locked_groups:
+            continue
         members = grouped[group]
         contribution = defaultdict(int)
         for row in members: contribution[(row["dataset_id"], bins[row["record_id"]])] += 1

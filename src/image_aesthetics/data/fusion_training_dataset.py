@@ -62,7 +62,11 @@ class FusionTrainingDataset(Dataset):
             "dataset_id": dataset_id,
             "image_id": item["image_id"],
             "group_id": str(target_row["group_id"]),
-            "development_fold": target_row["development_fold"],
+            # PyTorch's default collator cannot batch None values.  Locked-test
+            # rows have no development fold, represented as the explicit -1
+            # sentinel at the loader boundary.
+            "development_fold": (-1 if target_row["development_fold"] is None
+                                 else int(target_row["development_fold"])),
         }
 
 

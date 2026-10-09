@@ -4,7 +4,8 @@ from image_aesthetics.data.fusion_preparation import collapse_feature_labels
 def test_collapse_feature_labels_uses_one_aggregate_target_per_image():
     joined = [{"image_id": "flickr:x", "label_join_id": "flickr:x", "dataset_id": "flickr",
                "source_sha256": "a" * 64, "eligible_for_fusion": True,
-               "eligible_as_aesthetic_target": True, "quarantine": False}]
+               "eligible_as_aesthetic_target": True, "quarantine": False,
+               "locked_test": True}]
     labels = [{"label_join_id": "flickr:x", "sha256": "a" * 64, "image_name": "x.jpg",
                "metadata": {"aggregate_score_0_1": 0.7}, "source_groups": ["image:x"]},
               {"label_join_id": "flickr:x", "sha256": "a" * 64, "image_name": "x.jpg",
@@ -14,6 +15,7 @@ def test_collapse_feature_labels_uses_one_aggregate_target_per_image():
     assert rows[0]["native_score"] == 0.7
     assert rows[0]["native_score_range"] == [0.0, 1.0]
     assert rows[0]["raw_label_count"] == 2
+    assert rows[0]["upstream_locked_test"] is True
     assert audit["eligible_targets"] == 1
 
 
