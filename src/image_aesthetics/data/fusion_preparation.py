@@ -10,7 +10,98 @@ from typing import Iterable
 
 from PIL import Image, ImageOps
 
-VERSION = "fusion-prep-v3"
+VERSION = "fusion-prep-v4"
+
+
+def collapse_feature_labels(label_rows: list[dict], joined_rows: list[dict]) -> tuple[list[dict], dict]:
+    """Build one aesthetic target row per cached image.
+
+    Some sources (notably Flickr-AES) retain one raw row per rater.  Splits and
+    feature sampling must nevertheless operate at image granularity, otherwise
+    the same tensor can cross folds or be over-represented.  Raw label rows stay
+    intact on disk; this function uses their declared aggregate score.
+    """
+    labels: dict[str, list[dict]] = defaultdict(list)
+    for row in label_rows:
+        key = str(row.get("label_join_id") or row.get("join_feature_id") or "")
+        if key:
+            labels[key].append(row)
+    records: list[dict] = []
+    missing_labels: list[str] = []
+    inconsistent_labels: list[str] = []
+    for joined in joined_rows:
+        if (not joined.get("eligible_for_fusion") or
+                not joined.get("eligible_as_aesthetic_target") or
+                joined.get("quarantine")):
+            continue
+        feature_id = str(joined["image_id"])
+        matches = labels.get(str(joined.get("label_join_id") or feature_id), [])
+        if not matches:
+            missing_labels.append(feature_id)
+            continue
+
+        def target(label: dict) -> tuple[float, tuple[float, float]]:
+            aggregate = label.get("metadata", {}).get("aggregate_score_0_1")
+            if aggregate is not None:
+                return float(aggregate), (0.0, 1.0)
+            if label.get("native_score") is not None:
+                bounds = label.get("native_score_range")
+                if not bounds or len(bounds) != 2:
+                    raise ValueError(f"missing native score range for {feature_id}")
+                return float(label["native_score"]), (float(bounds[0]), float(bounds[1]))
+            if label.get("score") is not None:
+                return float(label["score"]), (0.0, 1.0)
+            raise ValueError(f"missing aesthetic target for {feature_id}")
+
+        aggregate_values = [float(item["metadata"]["aggregate_score_0_1"])
+                            for item in matches
+                            if item.get("metadata", {}).get("aggregate_score_0_1") is not None]
+        values = [target(label) for label in matches]
+        if aggregate_values:
+            if len(aggregate_values) != len(matches) or any(value != aggregate_values[0] for value in aggregate_values[1:]):
+                inconsistent_labels.append(feature_id)
+                continue
+            collapsed_target = (aggregate_values[0], (0.0, 1.0))
+        else:
+            bounds = values[0][1]
+            if any(value[1] != bounds for value in values[1:]):
+                inconsistent_labels.append(feature_id)
+                continue
+            # Raw per-rater rows are preserved in the source manifest.  Their
+            # image-level target is the mean on the native scale.
+            collapsed_target = (sum(value[0] for value in values) / len(values), bounds)
+        label = matches[0]
+        if label.get("sha256") and str(label["sha256"]) != str(joined["source_sha256"]):
+            raise ValueError(f"label/cache source hash mismatch for {feature_id}")
+        image_name = label.get("path") or label.get("image_name") or label.get("source_path")
+        if not image_name:
+            raise ValueError(f"missing image path for {feature_id}")
+        records.append({
+            "schema_version": "fusion-target-v1",
+            "record_id": feature_id,
+            "feature_id": feature_id,
+            "dataset_id": str(joined["dataset_id"]),
+            "image_id": feature_id,
+            "image_name": str(image_name),
+            "sha256": str(joined["source_sha256"]),
+            "native_score": collapsed_target[0],
+            "native_score_range": list(collapsed_target[1]),
+            "source_groups": sorted({str(group) for item in matches for group in item.get("source_groups", [])}),
+            "themes": label.get("themes", []),
+            "attributes": label.get("attributes", {}),
+            "source_split": label.get("split"),
+            "raw_label_count": len(matches),
+        })
+    audit = {
+        "joined_rows": len(joined_rows),
+        "raw_label_rows": len(label_rows),
+        "eligible_targets": len(records),
+        "missing_label_count": len(missing_labels),
+        "inconsistent_label_count": len(inconsistent_labels),
+        "missing_label_examples": missing_labels[:20],
+        "inconsistent_label_examples": inconsistent_labels[:20],
+    }
+    return records, audit
 
 
 class UnionFind:
@@ -233,7 +324,7 @@ def prepare_fusion(records: list[dict], image_roots: dict[str, Path], *, folds: 
     rows = []
     for row in sorted(records, key=lambda x: (str(x["dataset_id"]), str(x["image_id"]))):
         record = dict(row)
-        record["record_id"] = str(row["dataset_id"]) + ":" + str(row["image_id"])
+        record["record_id"] = str(row["record_id"])
         record["group_id"] = groups[record["record_id"]]
         record["development_fold"] = None if record["record_id"] not in folds_by_id else folds_by_id[record["record_id"]]
         record["locked_test"] = groups[record["record_id"]] in locked_groups
