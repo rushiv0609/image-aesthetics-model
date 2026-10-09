@@ -99,9 +99,9 @@ normalized expected rating.
 
 ## Signal 5: NIMA Aesthetic Score
 
-**What it is:** Neural Image Assessment (NIMA) is a model originally developed by Google that predicts the distribution of human aesthetic ratings for a photograph. Our implementation uses a MobileNetV2 backbone.
+**What it is:** Neural Image Assessment (NIMA) is a model originally developed by Google that predicts the distribution of human aesthetic ratings for a photograph. The research cache uses PyIQA's AVA-trained InceptionResNetV2 checkpoint; the unfinished MobileNetV2 head in Moments Generator is not used as training data.
 
-**How it's computed:** The 224×224 RGB image is preprocessed with ImageNet normalization and passed through a MobileNetV2 network. Instead of predicting a single score, the model outputs a probability distribution across 10 bins (ratings 1 through 10). The final score is the weighted mean of this distribution:
+**How it's computed:** The scorer uses PyIQA's checkpoint-defined preprocessing and InceptionResNetV2 network. Instead of predicting a single score, the model outputs a probability distribution across 10 bins (ratings 1 through 10). The final score is the weighted mean of this distribution:
 
 ```
 score = sum(i * probability[i] for i in range(1, 11))
@@ -116,8 +116,9 @@ This is normalized to 0.0–1.0 using `(score - 1) / 9`.
 **Characteristics:**
 - Range: 0.0 to 1.0
 - Input: Raw 224×224 RGB pixels (not embeddings)
-- Model backbone: MobileNetV2 (~14 MB)
-- Computed by: `NimaScorer` in `moments-generator/app/core/aesthetic.py`
+- Model backbone: InceptionResNetV2 (research cache)
+- Checkpoint SHA-256: `b0c77c00c789565be8e6af96c1641bbad716c1592bff1cdc749c6006b95bd34e`
+- Integration requirement: replace or update the unfinished `NimaScorer` in `moments-generator/app/core/aesthetic.py` before production use
 
 ---
 
@@ -270,6 +271,6 @@ This is exactly why we need a learned model — it can learn the *conditional* v
 
 The current Moments Generator scoring code is a proof of concept, not the authoritative training-data generator yet. Before producing the feature cache:
 
-- Load a genuine AVA-trained NIMA checkpoint. The current implementation replaces the ImageNet MobileNetV2 classifier with a newly initialized 10-bin head when no custom checkpoint is supplied, so those outputs are not valid NIMA predictions.
+- Use the pinned PyIQA AVA-trained InceptionResNetV2 NIMA checkpoint. The current Moments implementation replaces the ImageNet MobileNetV2 classifier with a newly initialized 10-bin head when no custom checkpoint is supplied, so those outputs are not valid NIMA predictions.
 - Give MUSIQ an aspect-ratio-preserving, suitably sized image rather than the shared 224×224 embedding input. The current pipeline does not match the native/multi-scale behavior described above.
 - Version the preprocessing and every scorer checkpoint in cache metadata so a cache cannot silently mix incompatible signal definitions.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a small identity-checked row index across two immutable caches."""
+"""Create an identity-checked row index across immutable feature caches."""
 from __future__ import annotations
 
 import argparse
@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--local-cache", type=Path, required=True, help="local-five cache directory")
     parser.add_argument("--remaining-cache", type=Path, required=True, help="remaining-four cache directory")
+    parser.add_argument("--nima-cache", type=Path, help="optional pretrained NIMA cache directory")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--image-root", type=Path, required=True)
     parser.add_argument("--dataset-id", required=True)
@@ -84,6 +85,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"cache manifests differ; refusing join: {mismatches}")
     if local_rows.keys() != remaining_rows.keys():
         raise SystemExit("cache image ID sets differ; refusing join")
+    nima_verify = nima_meta = nima_rows = None
+    if args.nima_cache:
+        nima_verify = _strict_verify(args.nima_cache, args.manifest, args.image_root)
+        nima_meta, nima_rows = _metadata(args.nima_cache)
+        nima_mismatches = _identity_mismatches(local_meta, nima_meta)
+        if nima_mismatches:
+            raise SystemExit(f"NIMA cache manifest differs; refusing join: {nima_mismatches}")
+        if local_rows.keys() != nima_rows.keys():
+            raise SystemExit("NIMA cache image ID set differs; refusing join")
 
     manifest_rows = [json.loads(line) for line in args.manifest.read_text().splitlines() if line.strip()]
     by_id = {row["image_id"]: row for row in manifest_rows}
@@ -91,19 +101,25 @@ def main(argv: list[str] | None = None) -> int:
     for image_id in sorted(local_rows, key=lambda key: local_rows[key][1]):
         left = local_rows[image_id]
         right = remaining_rows[image_id]
+        nima = nima_rows[image_id] if nima_rows is not None else None
         if left[1] != right[1] or left[2] != right[2]:
             raise SystemExit(f"cache row coordinates/source hashes differ for {image_id}")
         if left[3] != "completed" or right[3] != "completed":
             raise SystemExit(f"cache row is incomplete for {image_id}: {left[3]}, {right[3]}")
         if left[4] is None or left[5] is None or right[4] is None or right[5] is None:
             raise SystemExit(f"cache row has no shard location for {image_id}")
+        if nima is not None:
+            if left[1] != nima[1] or left[2] != nima[2] or nima[3] != "completed":
+                raise SystemExit(f"NIMA row identity/state differs for {image_id}")
+            if nima[4] is None or nima[5] is None:
+                raise SystemExit(f"NIMA row has no shard location for {image_id}")
         source = by_id.get(image_id)
         if source is None:
             raise SystemExit(f"image ID missing from canonical manifest: {image_id}")
         source_sha = source.get("source_sha256", left[2])
         if source_sha != left[2]:
             raise SystemExit(f"manifest source SHA differs from cache ledger for {image_id}")
-        joined.append({
+        joined_row = {
             "dataset_id": args.dataset_id,
             "image_id": image_id,
             "manifest_position": left[1],
@@ -120,7 +136,10 @@ def main(argv: list[str] | None = None) -> int:
             "label_join_id": source.get("label_join_id"),
             "split": source.get("split"),
             "locked_test": source.get("locked_test", False),
-        })
+        }
+        if nima is not None:
+            joined_row["nima"] = {"shard_id": nima[4], "row": nima[5]}
+        joined.append(joined_row)
 
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -139,14 +158,21 @@ def main(argv: list[str] | None = None) -> int:
         "cache_identities": {
             "local_five": local_meta["cache_identity"],
             "remaining_four": remaining_meta["cache_identity"],
+            **({"nima": nima_meta["cache_identity"]} if nima_meta else {}),
+        },
+        "cache_roots": {
+            "local_five": str(args.local_cache.resolve()),
+            "remaining_four": str(args.remaining_cache.resolve()),
+            **({"nima": str(args.nima_cache.resolve())} if args.nima_cache else {}),
         },
         "image_count": len(joined),
         "quarantined_count": sum(bool(row["quarantine"]) for row in joined),
         "fusion_eligible_count": sum(bool(row["eligible_for_fusion"]) for row in joined),
-        "active_signal_groups": ["local_five", "remaining_four"],
-        "blocked_signal": "nima",
+        "active_signal_groups": ["local_five", "remaining_four"] + (["nima"] if nima_meta else []),
+        "blocked_signal": None if nima_meta else "nima",
         "storage": "row index references existing immutable shards; no feature tensors copied",
-        "strict_verification": {"local_five": local_verify, "remaining_four": remaining_verify},
+        "strict_verification": {"local_five": local_verify, "remaining_four": remaining_verify,
+                                **({"nima": nima_verify} if nima_verify else {})},
         "join_sha256": expected_join_sha,
     }
     if audit_path.exists():
@@ -154,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         if any(existing_audit.get(key) != audit[key] for key in (
             "dataset_id", "manifest_sha256", "source_fingerprints_sha256",
             "cache_identities", "image_count", "join_sha256",
+            "cache_roots",
         )):
             raise SystemExit(f"existing immutable join audit differs from verified cache rows: {output}")
         print(json.dumps(existing_audit, indent=2))

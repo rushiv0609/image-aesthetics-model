@@ -1,4 +1,4 @@
-# Remaining Feature Cache: CLIP and MUSIQ
+# Final Ten-Signal Feature Cache
 
 ## Status
 
@@ -11,7 +11,7 @@ hash-pinned weights:
 | LAION-CLIP score | `sac+logos+ava1-l14-linearMSE.pth` | `21dd590f3ccdc646f0d53120778b296013b096a035a2718c9cb0d511bff0f1e0` | Implemented; strict state-dict load |
 | MUSIQ aesthetic | pyiqa `musiq-ava` | `e8d3f0671965dfe4301a1f7a4aedc8f49be8fed33b82dd5d116a9eb3ce2bd16b` | Implemented |
 | MUSIQ technical | pyiqa `musiq` / KonIQ-10k | `e95806b9eae5f3814c410f574ba8e552362bd5bc63d758ed5b97860f5d6185aa` | Implemented |
-| NIMA | No genuine trained checkpoint found locally | — | Blocked; ImageNet MobileNetV2 weights alone are not a NIMA model |
+| NIMA | PyIQA `nima` / AVA InceptionResNetV2 | `b0c77c00c789565be8e6af96c1641bbad716c1592bff1cdc749c6006b95bd34e` | Implemented; genuine pretrained checkpoint |
 
 No weights are downloaded or substituted. CLIP and LAION share one CLIP vision
 forward pass. The local CLIP checkpoint is loaded into OpenCLIP `ViT-L-14` with
@@ -36,7 +36,9 @@ load once per cache process and share decoded RGB inputs.
 - The cache stores float32 CLIP embeddings and scalar scores in immutable,
   checksummed shards. Rows preserve image ID, manifest position, source SHA-256,
   split, quarantine, and exposure metadata through the original manifest.
-- The existing local-five shards are never modified. The joined-nine index stores
+- NIMA predicts the AVA ten-bin distribution with an InceptionResNetV2 backbone;
+  the normalized mean rating is stored as one float in its own immutable cache.
+- The existing signal-group shards are never modified. The `joined-ten-v1` index stores
   references to shard/row locations after strict cache verification and exact
   checks of manifest hash, image ID, position, and source hash. It does not copy
   feature tensors.
@@ -89,7 +91,16 @@ cat /Users/rushivyas/datasets/image-aesthetics/fusion/features/remaining-four-v1
 cat /Users/rushivyas/datasets/image-aesthetics/aadb/features/remaining-four-v1/cache/progress.json
 ```
 
-The cache group is deliberately named `remaining-four-v1`, not `remaining-five`:
-NIMA remains unavailable until a real trained checkpoint with known provenance
-is supplied or approved for acquisition. A final ten-signal join/training cache
-must wait for NIMA or explicitly version a nine-signal training contract.
+## Final joined-ten status
+
+NIMA is stored separately at `<dataset>/features/nima-v1/cache`. The immutable
+training indexes are at `<dataset>/features/joined-ten-v1` for AVA, AADB,
+KonIQ-10k, SPAQ, PARA, Flickr-AES, and TAD66K. Each index references, in fixed
+order, `local_five` (772 floats), `remaining_four` (771 floats), and `nima`
+(1 float), for a total of 1,544 floats per image.
+
+All three source caches were strictly verified before every join. The real
+training loader sampled the first, middle, and last row of every dataset with
+finite outputs and exact dimensions: 424,515 total images. The implementation
+is `src/image_aesthetics/data/joined_ten_dataset.py`; no large cache artifact is
+stored in Git.
