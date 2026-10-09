@@ -264,7 +264,7 @@ GPU starvation, decode rate, RSS, swap, failure rate, and end-to-end images/seco
 
 ### Current implementation status
 
-The frozen `fusion-prep-v5` snapshot contains the four independent aesthetic
+The frozen `fusion-prep-v6` snapshot contains the four independent aesthetic
 targets: AADB, PARA, Flickr-AES, and TAD66K. It has 147,247 usable image-level
 records after quarantining unresolved near-duplicate candidates. Dataset-native
 locked-test rows are preserved as a hard boundary before assigning five
@@ -299,6 +299,25 @@ finite 32×1,544 batches from every fold before training begins.
 No binary dataset is allowed to define the shared numeric scale.
 
 ## Phase 7: Baselines F0-F4
+
+### Current implementation status
+
+F0-F4 are implemented under `src/image_aesthetics/models/fusion/` against the
+actual non-contiguous `joined-ten-v1` storage contract. F0 reproduces the
+query-independent portion of the current Moments fallback weighting; F1 can
+evaluate each named scalar or mean/median ensembles; F2-F4 are trainable and
+return a production score in `[0,1]`.
+
+`scripts/training/train_fusion_baseline.py` provides fold/seed/model selection,
+train-only streaming normalization, dataset-specific monotonic calibration,
+dataset-homogeneous balanced batches, compatible ranking loss, atomic status,
+best/last checkpoints, exact identity-checked resume, early stopping, and
+per-dataset/macro ranking and top-k metrics. `fusion-prep-v6` canonicalizes all
+Flickr-AES labels to one `[0,1]` scale. The separate immutable
+`spaq-technical-v2` split and `SPAQTechnicalDataset` are ready for an F5
+technical head; 29 exact overlaps with the aesthetic corpus are excluded so an
+auxiliary batch cannot expose aesthetic validation/test imagery. F0-F4
+intentionally remain single-head baselines.
 
 Implement and compare:
 

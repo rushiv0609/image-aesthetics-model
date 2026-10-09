@@ -10,7 +10,7 @@ from typing import Iterable
 
 from PIL import Image, ImageOps
 
-VERSION = "fusion-prep-v5"
+VERSION = "fusion-prep-v6"
 
 
 def collapse_feature_labels(label_rows: list[dict], joined_rows: list[dict]) -> tuple[list[dict], dict]:
@@ -70,6 +70,9 @@ def collapse_feature_labels(label_rows: list[dict], joined_rows: list[dict]) -> 
             # Raw per-rater rows are preserved in the source manifest.  Their
             # image-level target is the mean on the native scale.
             collapsed_target = (sum(value[0] for value in values) / len(values), bounds)
+        if str(joined["dataset_id"]) == "flickr_aes" and collapsed_target[1] != (0.0, 1.0):
+            low, high = collapsed_target[1]
+            collapsed_target = ((collapsed_target[0] - low) / (high - low), (0.0, 1.0))
         label = matches[0]
         if label.get("sha256") and str(label["sha256"]) != str(joined["source_sha256"]):
             raise ValueError(f"label/cache source hash mismatch for {feature_id}")

@@ -41,3 +41,14 @@ def test_collapse_feature_labels_averages_raw_rater_scores():
     assert rows[0]["native_score"] == 3.0
     assert rows[0]["raw_label_count"] == 3
     assert audit["inconsistent_label_count"] == 0
+
+
+def test_flickr_raw_rater_mean_is_canonicalized_to_zero_one():
+    joined = [{"image_id": "flickr_aes:x", "label_join_id": "flickr_aes:x", "dataset_id": "flickr_aes",
+               "source_sha256": "a" * 64, "eligible_for_fusion": True,
+               "eligible_as_aesthetic_target": True, "quarantine": False}]
+    labels = [{"label_join_id": "flickr_aes:x", "sha256": "a" * 64, "image_name": "x.jpg",
+               "native_score": score, "native_score_range": [1.0, 5.0]} for score in (2.0, 4.0)]
+    rows, _ = collapse_feature_labels(labels, joined)
+    assert rows[0]["native_score"] == 0.5
+    assert rows[0]["native_score_range"] == [0.0, 1.0]
