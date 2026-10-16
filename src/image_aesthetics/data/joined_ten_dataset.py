@@ -39,6 +39,17 @@ class JoinedTenDataset(Dataset):
                       (json.loads(line) for line in Path(label_manifest).read_text().splitlines() if line)}
             self.targets = labels
 
+    def __getstate__(self):
+        """Do not serialize open shard arrays into spawned DataLoader workers.
+
+        macOS uses ``spawn`` rather than ``fork``.  Keeping the per-process LRU
+        cache out of the pickle avoids a costly copy of already-open safetensor
+        shards; every worker repopulates its own bounded cache lazily.
+        """
+        state = self.__dict__.copy()
+        state["_cache"] = OrderedDict()
+        return state
+
     def __len__(self) -> int:
         return len(self.rows)
 

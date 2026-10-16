@@ -79,7 +79,7 @@ def execute_matrix(args, specs):
             norm=FeatureNormalizer.from_file(stats_path,expected_identity=expected) if stats_path.exists() else train_ds.fit_normalizer(stats_path)
             train_ds=train_ds.normalized(norm); val_ds=val_ds.normalized(norm)
         stats_hash=hashlib.sha256(stats_path.read_bytes()).hexdigest() if normalize else None; ident,payload=_identity(spec,args.split_manifest,normalize,stats_hash,args.limit)
-        cfg={'run_id':spec.run_id,'model':spec.model,'fold':spec.fold,'seed':spec.seed,'f1_mode':spec.f1_mode,'f1_signal':spec.f1_signal,'identity':ident,'identity_payload':payload,'epochs':args.epochs,'batch_size':args.batch_size,'patience':args.patience,'min_epochs':args.min_epochs,'locked_test_accessed':False}
+        cfg={'run_id':spec.run_id,'model':spec.model,'fold':spec.fold,'seed':spec.seed,'f1_mode':spec.f1_mode,'f1_signal':spec.f1_signal,'identity':ident,'identity_payload':payload,'epochs':args.epochs,'batch_size':args.batch_size,'num_workers':args.num_workers,'patience':args.patience,'min_epochs':args.min_epochs,'locked_test_accessed':False}
         if status_path_run.exists() and cfg_path.exists():
             try:
                 if json.loads(status_path_run.read_text()).get('state')=='completed' and json.loads(cfg_path.read_text()).get('identity')==ident:
@@ -102,7 +102,7 @@ def execute_matrix(args, specs):
             else:
                 ranges=_ranges(train_ds); cal=DatasetCalibrationHeads(ranges)
                 resume_dir=run/'checkpoints' if (run/'checkpoints/checkpoint.json').exists() and status_path_run.exists() else None
-                result=train_fusion(model,train_ds,val_ds,run,config=cfg,epochs=args.epochs,batch_size=args.batch_size,seed=spec.seed,device=args.device,patience=args.patience,min_epochs=args.min_epochs,calibrators=cal,resume=resume_dir)
+                result=train_fusion(model,train_ds,val_ds,run,config=cfg,epochs=args.epochs,batch_size=args.batch_size,seed=spec.seed,device=args.device,patience=args.patience,min_epochs=args.min_epochs,calibrators=cal,resume=resume_dir,num_workers=args.num_workers)
                 summaries[spec.run_id]=result.get('best_metrics',{})
             completed.append(spec.run_id)
         except Exception as exc:
@@ -112,7 +112,7 @@ def execute_matrix(args, specs):
     return aggregate
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('--execute',action='store_true'); p.add_argument('--smoke',action='store_true'); p.add_argument('--max-runs',type=int); p.add_argument('--data-root',type=Path,default=Path('/Users/rushivyas/datasets/image-aesthetics')); p.add_argument('--output-root',type=Path); p.add_argument('--split-manifest',type=Path); p.add_argument('--join',action='append'); p.add_argument('--folds',default='0,1,2,3,4'); p.add_argument('--seeds',default=','.join(map(str,DEFAULT_SEEDS))); p.add_argument('--epochs',type=int,default=50); p.add_argument('--patience',type=int,default=7); p.add_argument('--min-epochs',type=int,default=8); p.add_argument('--batch-size',type=int,default=256); p.add_argument('--limit',type=int); p.add_argument('--device',default='cpu')
+    p=argparse.ArgumentParser(); p.add_argument('--execute',action='store_true'); p.add_argument('--smoke',action='store_true'); p.add_argument('--max-runs',type=int); p.add_argument('--data-root',type=Path,default=Path('/Users/rushivyas/datasets/image-aesthetics')); p.add_argument('--output-root',type=Path); p.add_argument('--split-manifest',type=Path); p.add_argument('--join',action='append'); p.add_argument('--folds',default='0,1,2,3,4'); p.add_argument('--seeds',default=','.join(map(str,DEFAULT_SEEDS))); p.add_argument('--epochs',type=int,default=50); p.add_argument('--patience',type=int,default=7); p.add_argument('--min-epochs',type=int,default=8); p.add_argument('--batch-size',type=int,default=256); p.add_argument('--num-workers',type=int,default=0); p.add_argument('--limit',type=int); p.add_argument('--device',default='cpu')
     args=p.parse_args()
     args.output_root=args.output_root or args.data_root/'fusion/experiments'/('baseline-matrix-v6-smoke' if args.smoke else 'baseline-matrix-v6')
     args.split_manifest=args.split_manifest or args.data_root/'fusion/prepared/v6/samples.jsonl'

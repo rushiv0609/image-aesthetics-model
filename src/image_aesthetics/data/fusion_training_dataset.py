@@ -21,7 +21,7 @@ class FusionTrainingDataset(Dataset):
 
     def __init__(self, split_manifest: Path, join_dirs: Mapping[str, Path], *,
                  partition: str, validation_fold: int | None = None,
-                 allow_locked_test: bool = False, max_open_shards: int = 8,
+                 allow_locked_test: bool = False, max_open_shards: int = 128,
                  normalizer: FeatureNormalizer | None = None):
         if partition not in {"train", "validation", "locked_test"}:
             raise ValueError(f"unknown partition: {partition}")
@@ -178,6 +178,14 @@ class NormalizedFusionTrainingDataset(Dataset):
         self.dataset = dataset
         self.normalizer = (normalizer if isinstance(normalizer, FeatureNormalizer)
                            else FeatureNormalizer(normalizer))
+        # ``FeatureNormalizer.transform`` correctly supports arbitrary tensor
+        # devices, but rebuilding these two 1,544-element tensors for every
+        # sample made the single-worker cached-feature loader needlessly slow.
+        # Training views are host-side at this boundary, so immutable CPU
+        # vectors preserve the exact transform without repeated allocation.
+        import torch
+        self._mean = torch.as_tensor(self.normalizer.stats.mean, dtype=torch.float32)
+        self._std = torch.as_tensor(self.normalizer.stats.std, dtype=torch.float32)
         if hasattr(dataset, "samples"):
             self.samples = dataset.samples
 
@@ -186,7 +194,8 @@ class NormalizedFusionTrainingDataset(Dataset):
 
     def __getitem__(self, index: int):
         result = dict(self.dataset[index])
-        result["features"] = self.normalizer.transform(result["features"])
+        features = result["features"]
+        result["features"] = (features - self._mean.to(dtype=features.dtype)) / self._std.to(dtype=features.dtype)
         result["normalization_stats_hash"] = self.normalizer.stats.stats_hash
         return result
 

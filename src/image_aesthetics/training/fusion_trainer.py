@@ -38,21 +38,45 @@ def _metrics(pred: list[float], target: list[float]):
     return out
 
 def _collect(model, loader, device, calibrators=None):
-    model.eval(); all_pred=[]; all_target=[]; by={}; losses=[]
-    calibrated_by={}
+    """Evaluate while avoiding one accelerator-to-host synchronization per batch.
+
+    Validation metrics are host-side NumPy metrics, but a validation epoch can
+    contain hundreds of small batches.  Keeping the compact prediction/target
+    tensors on the selected device until the loader is exhausted makes that
+    boundary explicit and is materially cheaper on MPS.  The result is exactly
+    the same set of predictions and labels as the prior per-batch transfer.
+    """
+    model.eval(); pred_batches=[]; target_batches=[]; dataset_ids=[]
+    calibrated_pred_batches=[]; native_target_batches=[]; loss_total=None; loss_count=0
     with torch.no_grad():
         for batch in loader:
             x=batch['features'].to(device).float(); y=batch['target'].to(device).float(); pred=model(x)
             if pred.ndim>1: pred=pred.mean(-1)
-            all_pred.extend(pred.cpu().tolist()); all_target.extend(y.cpu().tolist())
-            for ds,p,t in zip(batch['dataset_id'],pred.cpu().tolist(),y.cpu().tolist()): by.setdefault(str(ds),[[],[]]); by[str(ds)][0].append(p); by[str(ds)][1].append(t)
+            pred_batches.append(pred.detach()); target_batches.append(y.detach()); dataset_ids.extend(map(str, batch['dataset_id']))
             if calibrators is not None:
                 native=batch['native_target'].to(device).float(); calibrated=calibrators(pred,list(batch['dataset_id']))
-                losses.append(float(torch.nn.functional.huber_loss(calibrated,native)))
-                for ds,p,t in zip(batch['dataset_id'],calibrated.cpu().tolist(),native.cpu().tolist()): calibrated_by.setdefault(str(ds),[[],[]]); calibrated_by[str(ds)][0].append(p); calibrated_by[str(ds)][1].append(t)
+                batch_loss=torch.nn.functional.huber_loss(calibrated,native)
+                calibrated_pred_batches.append(calibrated.detach()); native_target_batches.append(native.detach())
             else:
-                losses.append(float(torch.nn.functional.huber_loss(pred,y)))
-    report={'macro':{},'overall':_metrics(all_pred,all_target),'loss':float(np.mean(losses)) if losses else 0.0,'per_dataset':{ds:_metrics(v[0],v[1]) for ds,v in sorted(by.items())}}
+                batch_loss=torch.nn.functional.huber_loss(pred,y)
+            loss_total=batch_loss.detach() if loss_total is None else loss_total+batch_loss.detach(); loss_count+=1
+    if pred_batches:
+        # One host transfer for normalized prediction/target pairs.
+        normalized_pairs=torch.stack((torch.cat(pred_batches),torch.cat(target_batches)),dim=-1).cpu().tolist()
+    else:
+        normalized_pairs=[]
+    by={}
+    for ds,(prediction,target) in zip(dataset_ids,normalized_pairs):
+        by.setdefault(ds,[[],[]]); by[ds][0].append(prediction); by[ds][1].append(target)
+    calibrated_by={}
+    if calibrated_pred_batches:
+        # Calibration diagnostics use a second compact transfer only when
+        # calibration heads are enabled.
+        calibrated_pairs=torch.stack((torch.cat(calibrated_pred_batches),torch.cat(native_target_batches)),dim=-1).cpu().tolist()
+        for ds,(prediction,target) in zip(dataset_ids,calibrated_pairs):
+            calibrated_by.setdefault(ds,[[],[]]); calibrated_by[ds][0].append(prediction); calibrated_by[ds][1].append(target)
+    all_pred=[pair[0] for pair in normalized_pairs]; all_target=[pair[1] for pair in normalized_pairs]
+    report={'macro':{},'overall':_metrics(all_pred,all_target),'loss':float((loss_total/loss_count).cpu()) if loss_count else 0.0,'per_dataset':{ds:_metrics(v[0],v[1]) for ds,v in sorted(by.items())}}
     if report['per_dataset']:
         for key in report['overall']:
             vals=[v[key] for v in report['per_dataset'].values() if key in v]; report['macro'][key]=float(np.mean(vals)) if vals else 0.0
@@ -60,10 +84,20 @@ def _collect(model, loader, device, calibrators=None):
         report['native_calibration']={ds:{'mae':float(np.mean(np.abs(np.asarray(v[0])-np.asarray(v[1])))),'rmse':float(np.sqrt(np.mean((np.asarray(v[0])-np.asarray(v[1]))**2)))} for ds,v in sorted(calibrated_by.items())}
     return report
 
-def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, config: dict[str,Any], epochs=50, batch_size=256, seed=20260920, device=None, patience=7, min_epochs=8, ranking_weight=.1, calibrators=None, technical_loader=None, resume: Path | None = None):
+def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, config: dict[str,Any], epochs=50, batch_size=256, seed=20260920, device=None, patience=7, min_epochs=8, ranking_weight=.1, calibrators=None, technical_loader=None, resume: Path | None = None, status_interval_batches: int = 25, num_workers: int = 0):
     torch.manual_seed(seed); np.random.seed(seed); random.seed(seed)
+    if status_interval_batches < 1: raise ValueError('status_interval_batches must be positive')
+    if num_workers < 0: raise ValueError('num_workers must be non-negative')
     device=torch.device(device or ('mps' if torch.backends.mps.is_available() else 'cpu')); model.to(device); calibrators=calibrators.to(device) if calibrators is not None else None; out=Path(output_dir); out.mkdir(parents=True,exist_ok=True)
-    sampler=DatasetBalancedBatchSampler(train_dataset,batch_size,seed=seed); train_loader=DataLoader(train_dataset,batch_sampler=sampler,num_workers=0); val_loader=DataLoader(validation_dataset,batch_size=batch_size,shuffle=False,num_workers=0)
+    sampler=DatasetBalancedBatchSampler(train_dataset,batch_size,seed=seed)
+    # macOS workers are opt-in: their startup and per-worker shard caches cost
+    # memory, but M5 measurements show that four persistent workers can remove
+    # the dominant cached-feature loading bottleneck for 1,024-row batches.
+    loader_options={'num_workers':num_workers}
+    if num_workers:
+        loader_options.update({'persistent_workers':True,'prefetch_factor':2})
+    train_loader=DataLoader(train_dataset,batch_sampler=sampler,**loader_options)
+    val_loader=DataLoader(validation_dataset,batch_size=batch_size,shuffle=False,**loader_options)
     params=[p for p in model.parameters() if p.requires_grad] + ([p for p in calibrators.parameters() if p.requires_grad] if calibrators is not None else []); opt=torch.optim.AdamW(params,lr=3e-4,weight_decay=1e-4) if params else None; total=max(1,epochs*len(train_loader)); warm=max(1,int(.05*total)); sched=torch.optim.lr_scheduler.CosineAnnealingLR(opt,T_max=max(1,total-warm)) if opt else None
     status=out/'training-status.json'; metrics_path=out/'epoch-metrics.jsonl'; ck=out/'checkpoints'; ck.mkdir(exist_ok=True); best=-1e9; patience_best=-1e9; bad=0; best_epoch=0; step=0; start=0; t0=time.time()
     if resume:
@@ -84,14 +118,20 @@ def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, 
         if source_metrics.exists() and not metrics_path.exists(): metrics_path.write_text(source_metrics.read_text())
     _atomic_json(status,{'state':'running','epoch':0,'batch':0,'batches_total':len(train_loader),'best_epoch':0,'patience_remaining':patience,'config':config})
     for epoch in range(start,epochs):
-        sampler.set_epoch(epoch); model.train(); train_losses=[]
+        sampler.set_epoch(epoch); model.train(); train_loss_total=None
         for bi,batch in enumerate(train_loader):
             x=batch['features'].to(device).float(); y=batch['target'].to(device).float(); pred=model(x); pred=pred.mean(-1) if pred.ndim>1 else pred
             if calibrators is not None:
                 loss,_=calibrated_huber_loss(pred,batch['native_target'].to(device).float(),list(batch['dataset_id']),calibrators)
             else:
                 loss=torch.nn.functional.huber_loss(pred,y)
-            if ranking_weight: loss=loss+ranking_weight*pairwise_ranking_loss(pred,y,groups=batch.get('pairing_group'))
+            if ranking_weight:
+                # DatasetBalancedBatchSampler emits homogeneous batches.  In
+                # that common case every pair is compatible, so avoid the
+                # expensive Python O(B^2) compatibility matrix construction.
+                pairing_groups=batch.get('pairing_group')
+                groups=None if pairing_groups is not None and len(set(pairing_groups)) == 1 else pairing_groups
+                loss=loss+ranking_weight*pairwise_ranking_loss(pred,y,groups=groups)
             if hasattr(model,'regularization_loss'): loss=loss+model.regularization_loss()
             # Optional SPAQ adapter: callers may provide a callable returning a
             # scalar auxiliary loss for the current batch.  The baseline models
@@ -103,8 +143,14 @@ def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, 
                 opt.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(),1.0); opt.step(); step+=1
                 if step>warm: sched.step()
             else: step+=1
-            train_losses.append(float(loss.detach())); _atomic_json(status,{'state':'running','epoch':epoch+1,'batch':bi+1,'batches_total':len(train_loader),'loss':float(np.mean(train_losses)),'lr':opt.param_groups[0]['lr'] if opt else 0.0,'best_epoch':best_epoch,'patience_remaining':patience-bad,'global_step':step,'elapsed_seconds':time.time()-t0})
-        report=_collect(model,val_loader,device,calibrators); score=report['macro'].get('spearman',report['overall']['spearman']); row={'epoch':epoch+1,'train_loss':float(np.mean(train_losses)),'val_loss':report['loss'],'val':report,'lr':opt.param_groups[0]['lr'] if opt else 0.0,'elapsed_seconds':time.time()-t0}
+            train_loss_total=loss.detach() if train_loss_total is None else train_loss_total+loss.detach()
+            # Frequent JSON writes dominate tiny-model training and also force
+            # a device synchronization to report the running loss.  Always
+            # write the final batch of an epoch for accurate resumable state.
+            if (bi+1) % status_interval_batches == 0 or bi+1 == len(train_loader):
+                _atomic_json(status,{'state':'running','epoch':epoch+1,'batch':bi+1,'batches_total':len(train_loader),'loss':float((train_loss_total/(bi+1)).cpu()),'lr':opt.param_groups[0]['lr'] if opt else 0.0,'best_epoch':best_epoch,'patience_remaining':patience-bad,'global_step':step,'elapsed_seconds':time.time()-t0})
+        train_loss=float((train_loss_total/len(train_loader)).cpu()) if train_loss_total is not None else 0.0
+        report=_collect(model,val_loader,device,calibrators); score=report['macro'].get('spearman',report['overall']['spearman']); row={'epoch':epoch+1,'train_loss':train_loss,'val_loss':report['loss'],'val':report,'lr':opt.param_groups[0]['lr'] if opt else 0.0,'elapsed_seconds':time.time()-t0}
         with metrics_path.open('a') as f: f.write(json.dumps(row)+'\n')
         improved=score>best
         if improved: best=score; best_epoch=epoch+1
