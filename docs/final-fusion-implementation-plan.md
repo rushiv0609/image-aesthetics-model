@@ -356,6 +356,17 @@ python scripts/training/smoke_f5.py --device mps --samples 16 --epochs 1
 These commands use deterministic in-memory rows and temporary output folders;
 they do not access research data or count as candidate training runs.
 
+After preflight succeeds on an MPS-capable host, start the fixed screen with:
+
+```bash
+caffeinate -dimsu .venv/bin/python scripts/training/run_f5_screen.py \
+  --execute --device mps --batch-size 1024 --num-workers 4 \
+  --status-interval-batches 25 --epochs 50 --patience 7 --min-epochs 8
+```
+
+The screen's candidate/fold/seed matrix is fixed in code; its CLI cannot expand
+to other folds, seeds, technical supervision, or a test partition.
+
 Initial frozen search space:
 
 ```text

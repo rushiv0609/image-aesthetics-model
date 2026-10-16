@@ -50,11 +50,11 @@ def _collect(model, loader, device, calibrators=None):
     calibrated_pred_batches=[]; native_target_batches=[]; loss_total=None; loss_count=0
     with torch.no_grad():
         for batch in loader:
-            x=batch['features'].to(device).float(); y=batch['target'].to(device).float(); pred=model(x)
+            x=batch['features'].to(device=device,dtype=torch.float32); y=batch['target'].to(device=device,dtype=torch.float32); pred=model(x)
             if pred.ndim>1: pred=pred.mean(-1)
             pred_batches.append(pred.detach()); target_batches.append(y.detach()); dataset_ids.extend(map(str, batch['dataset_id']))
             if calibrators is not None:
-                native=batch['native_target'].to(device).float(); calibrated=calibrators(pred,list(batch['dataset_id']))
+                native=batch['native_target'].to(device=device,dtype=torch.float32); calibrated=calibrators(pred,list(batch['dataset_id']))
                 batch_loss=torch.nn.functional.huber_loss(calibrated,native)
                 calibrated_pred_batches.append(calibrated.detach()); native_target_batches.append(native.detach())
             else:
@@ -120,9 +120,9 @@ def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, 
     for epoch in range(start,epochs):
         sampler.set_epoch(epoch); model.train(); train_loss_total=None
         for bi,batch in enumerate(train_loader):
-            x=batch['features'].to(device).float(); y=batch['target'].to(device).float(); pred=model(x); pred=pred.mean(-1) if pred.ndim>1 else pred
+            x=batch['features'].to(device=device,dtype=torch.float32); y=batch['target'].to(device=device,dtype=torch.float32); pred=model(x); pred=pred.mean(-1) if pred.ndim>1 else pred
             if calibrators is not None:
-                loss,_=calibrated_huber_loss(pred,batch['native_target'].to(device).float(),list(batch['dataset_id']),calibrators)
+                loss,_=calibrated_huber_loss(pred,batch['native_target'].to(device=device,dtype=torch.float32),list(batch['dataset_id']),calibrators)
             else:
                 loss=torch.nn.functional.huber_loss(pred,y)
             if ranking_weight:
