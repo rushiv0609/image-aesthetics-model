@@ -1,4 +1,4 @@
-"""Training/evaluation loop for leakage-safe F1-F4 fusion baselines."""
+"""Training/evaluation loop for leakage-safe F1-F5 fusion baselines."""
 from __future__ import annotations
 import json, os, random, time
 from pathlib import Path

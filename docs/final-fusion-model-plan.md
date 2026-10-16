@@ -368,4 +368,5 @@ ship F3 and avoid carrying redundant vector inputs into the final head.
 5. Create the cross-dataset exposure/dedup report.
 6. Generalize the AVA feature-cache pipeline to dataset adapters without changing its
    concurrency or durability guarantees.
-7. Pre-cache all ten signals, then train F1-F4 before implementing F5.
+7. Pre-cache all ten signals, establish F1-F4 baselines, then compare the
+   implemented F5 candidates under the same leakage-safe experiment policy.

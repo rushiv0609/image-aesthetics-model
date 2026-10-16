@@ -21,7 +21,8 @@ This plan implements the architecture and data decisions in
    registry record and an external snapshot of its terms.
 3. Never train from raw directory layout. Every dataset must pass through the same
    prepared-manifest contract.
-4. Do not build the full F5 model until F1-F4 baselines and feature ablations exist.
+4. Build F5 only after F1-F4 baselines and feature ablations exist; keep its
+   candidate comparisons controlled and separate from architecture design.
 5. Reuse the AVA cache pipeline's durability primitives; do not copy its code into a
    parallel implementation.
 6. Keep acquisition, preparation, feature extraction, model training, and release
@@ -332,6 +333,28 @@ budget. Report dataset-macro and per-dataset Spearman, pairwise accuracy, top-k 
 MAE/calibration, parameter count, and CPU/MPS latency.
 
 ## Phase 8: F5 Branch-Aware Gated Residual MLP
+
+Implementation status (2026-10-16): the historical F3 remains unchanged and
+`F3C` provides the corrected no-per-image-LayerNorm control. `F5-R`, `F5-G`,
+and `F5-X` now implement the approved shapes in
+`docs/f5-architecture-decision-memo.md`. Each uses the same-fold/same-seed F2
+scalar logit plus a zero-initialized bounded residual; CLI initialization
+validates the F2 run identity, split manifest, normalization artifact, fold,
+seed, and subset limit. Stable architecture/provenance fields participate in
+new-run/resume identity. Technical scoring remains an opt-in model API only;
+the aesthetic screen has no technical task or SPAQ loader. No F5 screen,
+confirmation matrix, LODO experiment, or locked-test evaluation has started.
+
+Use only the `smoke_f5.py` synthetic check while validating code paths:
+
+```bash
+python scripts/training/smoke_f5.py --device cpu --samples 16 --epochs 1
+# On a host where PyTorch MPS is available:
+python scripts/training/smoke_f5.py --device mps --samples 16 --epochs 1
+```
+
+These commands use deterministic in-memory rows and temporary output folders;
+they do not access research data or count as candidate training runs.
 
 Initial frozen search space:
 

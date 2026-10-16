@@ -1,6 +1,8 @@
 # F5 architecture council: decision memo
 
-Status: proposal for review; no F5 implementation or training has started.
+Status: approved for implementation. F3C and F5-R/G/X model implementations,
+provenance-checked F2 initialization, and synthetic smoke checks are in place.
+The proposed 12-run screen and full F5 matrix have **not** been started.
 
 ## Product and evidence boundary
 
@@ -78,6 +80,18 @@ counts include an aesthetic head, a one-output technical head for a later
 SPAQ experiment, and the nine-parameter F2-style scalar base. They exclude the
 training-only dataset calibrators (eight parameters for four aesthetic
 datasets) and frozen upstream vision models.
+
+The implementation keeps the technical head disabled for aesthetic screening.
+Its explicit `forward_with_aux` API taps the candidate's penultimate residual
+representation and returns a separate technical score; normal `forward`
+continues to return only the aesthetic score. The trainer CLI does not enable
+the auxiliary task or load SPAQ data in the initial screen. Each F5 CLI run
+requires fold-fitted normalization and a best F2 checkpoint from the same
+fold, seed, split manifest, and normalization artifact. The copied F2 scalar
+weights form the shared pre-sigmoid logit; a zero-initialized, tanh-bounded
+residual makes the starting F5 aesthetic score exactly equal to that F2 fit.
+`F3C` is the separate no-per-image-LayerNorm control; historical F3 remains
+unchanged.
 
 Every candidate predicts an aesthetic logit as
 `z = b_F2 + w_F2 · scalars + residual` and returns `sigmoid(z)`.

@@ -62,6 +62,29 @@ class ScalarMLP(nn.Module):
         super().__init__(); self.net = nn.Sequential(nn.LayerNorm(SCALAR_DIM), nn.Linear(SCALAR_DIM, hidden), nn.GELU(), nn.Dropout(dropout), nn.Linear(hidden, hidden // 2), nn.GELU(), nn.Linear(hidden // 2, 1))
     def forward(self, features: torch.Tensor) -> torch.Tensor: return self.net(split_features(features)[2]).squeeze(-1).sigmoid()
 
+class CorrectedScalarMLP(nn.Module):
+    """F3C: corrected F3 control without per-image scalar LayerNorm.
+
+    Inputs are expected to have the existing fold-fitted normalization applied
+    by the dataset view.  The historical ``ScalarMLP`` remains unchanged.
+    """
+    architecture_id = "F3C-no-per-image-layernorm-v1"
+
+    def __init__(self, hidden: int = 64, dropout: float = 0.1):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(SCALAR_DIM, hidden), nn.GELU(),
+                                 nn.Dropout(dropout), nn.Linear(hidden, hidden // 2),
+                                 nn.GELU(), nn.Linear(hidden // 2, 1))
+        self.hidden = hidden
+        self.dropout = float(dropout)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.net(split_features(features)[2]).squeeze(-1).sigmoid()
+
+    def architecture_config(self) -> dict[str, object]:
+        return {"model_id": self.architecture_id, "hidden": self.hidden,
+                "dropout": self.dropout, "scalar_normalization": "fold-fitted only"}
+
 class FlatFeatureMLP(nn.Module):
     """F4: flat 1,544-feature MLP kept below the one-million parameter budget."""
     def __init__(self, hidden: tuple[int, int] = (256, 128), dropout: float = 0.1):
@@ -72,4 +95,12 @@ class FlatFeatureMLP(nn.Module):
     def forward(self, features: torch.Tensor) -> torch.Tensor: return self.net(features).squeeze(-1).sigmoid()
 
 def build_baseline(name: str, **kwargs) -> nn.Module:
-    return {"F0": WeightedScalarScore, "F1": ScalarEnsemble, "F2": RegularizedLinear, "F3": ScalarMLP, "F4": FlatFeatureMLP}[name](**kwargs)
+    if name in {"F5-R", "F5-G", "F5-X"}:
+        from .f5 import F5G, F5R, F5X
+        return {"F5-R": F5R, "F5-G": F5G, "F5-X": F5X}[name](**kwargs)
+    factories = {"F0": WeightedScalarScore, "F1": ScalarEnsemble,
+                 "F2": RegularizedLinear, "F3": ScalarMLP,
+                 "F3C": CorrectedScalarMLP, "F4": FlatFeatureMLP}
+    if name not in factories:
+        raise ValueError(f"unknown fusion model {name!r}; choose from {sorted((*factories, 'F5-R', 'F5-G', 'F5-X'))}")
+    return factories[name](**kwargs)
