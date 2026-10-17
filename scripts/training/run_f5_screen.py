@@ -498,7 +498,12 @@ def execute_screen(args: argparse.Namespace) -> dict[str, Any]:
         try:
             if spec.fold not in fold_inputs:
                 fold_inputs[spec.fold] = _prepare_inputs(args, spec, baseline_root)
-            train_data, validation_data, _normalizer, paths, cache_identity = fold_inputs[spec.fold]
+            train_data, validation_data, _normalizer, _fold_paths, cache_identity = fold_inputs[spec.fold]
+            # Dataset objects and normalization are fold-scoped, but the F2
+            # initialization checkpoint is fold-and-seed scoped.  Re-resolve
+            # paths for every spec so a cached fold cannot retain the first
+            # seed's checkpoint for later runs.
+            paths = artifact_paths(args.data_root, baseline_root, spec)
             # Seed parameter construction before instantiating each candidate;
             # train_fusion reseeds the same run seed for its data/training RNG.
             torch.manual_seed(spec.seed)
