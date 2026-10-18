@@ -24,3 +24,10 @@ false positives versus F0, F1, and F4 before production promotion.
 The evaluator can be run before ratings arrive to validate schemas, but null human
 metrics are explicitly non-evidence. This separates automatable benchmark
 preparation from the real-rater work that remains inherently human.
+
+`scripts/evaluation/prepare_moments_benchmark.py` creates the private external
+manifest, a mode-0600 ID salt, an empty annotation stream, and a privacy-safe
+summary. It groups chronologically adjacent media into events using a fixed six-hour
+gap (configurable before freeze), preferring EXIF capture time and falling back to
+file modification time. Only the protocol and aggregate summary may be committed;
+the salt, paths, media, and annotations remain external.
