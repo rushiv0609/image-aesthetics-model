@@ -58,8 +58,10 @@ launched while policy decisions are still changing.
 ## One-time locked evaluation
 
 The evaluation command also plans by default; planning reads only the frozen
-policy. Execution requires a completed fit manifest, verifies its policy and
-checkpoint hashes, and atomically creates the one fixed external receipt at
+policy. Execution requires a completed fit manifest and, before consuming the
+one attempt, verifies its policy and checkpoint hashes plus every non-locked
+split, feature-cache, normalizer, and calibrator artifact. It then atomically
+creates the one fixed external receipt at
 `<data-root>/fusion/experiments/f5-finalization/locked-test-evaluation.receipt.json`
 using exclusive file creation before opening the locked partition. The path is
 derived from the data root, so callers cannot choose another receipt path to
@@ -67,8 +69,8 @@ retry. A second attempt fails immediately. A started, failed, or interrupted
 receipt is consumed permanently; recovery means retaining that evidence and
 reviewing it, never rerunning against the locked labels.
 
-The evaluator then rechecks split, feature-cache, normalizer, and calibrator
-hashes, loads only the locked partition, averages the frozen seed predictions,
+Only after the durable receipt exists does the evaluator load the locked
+partition, average the frozen seed predictions,
 applies the frozen shared isotonic map, and writes raw and calibrated aggregate
 metrics. Successful completion updates the receipt with the report digest. Any
 error after receipt creation records `failed_closed` and re-raises. Keep the
