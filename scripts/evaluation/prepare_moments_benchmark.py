@@ -10,6 +10,13 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp", ".tif", ".tiff"}
 VIDEO_EXTENSIONS = {".mov", ".mp4", ".m4v", ".avi"}
 
 
+def _media_paths(media_root: Path) -> tuple[list[Path], list[Path]]:
+    candidates = sorted(path for path in media_root.rglob("*")
+                        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS)
+    return [path for path in candidates if path.stat().st_size > 0], [
+        path for path in candidates if path.stat().st_size == 0]
+
+
 def _timestamp(path: Path) -> float:
     try:
         from PIL import Image, ExifTags
@@ -26,8 +33,7 @@ def _timestamp(path: Path) -> float:
 
 def prepare(media_root: Path, salt: bytes, *, event_gap_hours: float = 6.0) -> list[dict]:
     media_root = media_root.resolve()
-    paths = sorted(path for path in media_root.rglob("*")
-                   if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS)
+    paths, _excluded_zero_byte = _media_paths(media_root)
     rows = []
     for path in paths:
         relative = path.relative_to(media_root).as_posix()
@@ -63,6 +69,7 @@ def main():
     else:
         salt = os.urandom(32); salt_path.write_bytes(salt); salt_path.chmod(0o600)
     rows = prepare(args.media_root, salt, event_gap_hours=args.event_gap_hours)
+    _usable, excluded_zero_byte = _media_paths(args.media_root.resolve())
     manifest = args.output_dir / "manifest.private.jsonl"
     manifest.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
     annotations = args.output_dir / "annotations.jsonl"
@@ -71,6 +78,7 @@ def main():
                "events": len({row["event_id"] for row in rows}),
                "images": sum(row["media_type"] == "image" for row in rows),
                "videos": sum(row["media_type"] == "video" for row in rows),
+               "excluded_zero_byte_files": len(excluded_zero_byte),
                "human_annotations_present": annotations.stat().st_size > 0,
                "private_media_paths_committed": False}
     (args.output_dir / "preparation-summary.json").write_text(

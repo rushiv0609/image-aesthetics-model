@@ -16,3 +16,12 @@ def test_prepare_uses_opaque_ids_and_groups_by_time(monkeypatch, tmp_path):
     assert rows[1]["event_id"] != rows[2]["event_id"]
     assert all(tmp_path.name not in row["item_id"] for row in rows)
     assert rows[2]["media_type"] == "video"
+
+
+def test_prepare_excludes_zero_byte_media(monkeypatch, tmp_path):
+    good = tmp_path / "good.jpg"; good.write_bytes(b"image")
+    empty = tmp_path / "empty.mov"; empty.touch()
+    monkeypatch.setattr("scripts.evaluation.prepare_moments_benchmark._timestamp",
+                        lambda _path: 1.0)
+    rows = prepare(tmp_path, b"s" * 32)
+    assert [Path(row["media_path"]).name for row in rows] == ["good.jpg"]
