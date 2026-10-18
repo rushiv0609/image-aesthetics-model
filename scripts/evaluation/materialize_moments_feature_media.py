@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = {
     "images": "hard-link original JPEG/PNG/TIFF/WebP bytes",
     "heic": "sips -s format jpeg -s formatOptions 95",
-    "videos": "ffmpeg temporal midpoint, one JPEG frame, -q:v 2",
-    "video_aggregation": "one deterministic midpoint representative per file",
+    "videos": "ffmpeg temporal midpoint, one JPEG frame, -q:v 2; first frame when duration metadata is absent",
+    "video_aggregation": "one deterministic midpoint representative per file, with recorded first-frame fallback",
 }
 
 
@@ -39,12 +39,15 @@ def _run(command: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(command, check=True, capture_output=True, text=True)
 
 
-def _duration(path: Path, runner=_run) -> float:
+def _duration(path: Path, runner=_run) -> float | None:
     result = runner([
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", str(path),
     ])
-    duration = float(result.stdout.strip())
+    raw = result.stdout.strip()
+    if raw in {"", "N/A"}:
+        return None
+    duration = float(raw)
     if not 0 < duration < 24 * 3600:
         raise ValueError(f"invalid video duration for {path}: {duration}")
     return duration
@@ -55,10 +58,15 @@ def _materialize_one(row: dict, destination: Path, runner=_run) -> dict:
     kind = str(row["media_type"])
     if kind == "video":
         duration = _duration(source, runner)
-        offset = duration / 2.0
-        runner(["ffmpeg", "-v", "error", "-ss", f"{offset:.6f}", "-i", str(source),
-                "-frames:v", "1", "-q:v", "2", str(destination)])
-        method = "video-midpoint-ffmpeg"
+        offset = duration / 2.0 if duration is not None else 0.0
+        command = ["ffmpeg", "-v", "error"]
+        if duration is not None:
+            command.extend(["-ss", f"{offset:.6f}"])
+        command.extend(["-i", str(source), "-frames:v", "1", "-q:v", "2",
+                        str(destination)])
+        runner(command)
+        method = ("video-midpoint-ffmpeg" if duration is not None
+                  else "video-first-frame-no-duration")
     elif source.suffix.lower() == ".heic":
         runner(["sips", "-s", "format", "jpeg", "-s", "formatOptions", "95",
                 str(source), "--out", str(destination)])

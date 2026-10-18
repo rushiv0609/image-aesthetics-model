@@ -47,3 +47,24 @@ def test_refuses_to_overwrite_existing_output(tmp_path):
     output = tmp_path / "output"; output.mkdir(); (output / "evidence").write_text("x")
     with pytest.raises(FileExistsError):
         materialize(manifest, output)
+
+
+def test_durationless_video_uses_recorded_first_frame_fallback(tmp_path):
+    video = tmp_path / "durationless.mov"; video.write_bytes(b"video")
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text(json.dumps({"item_id": "v", "media_path": str(video),
+                                    "media_type": "video"}) + "\n")
+    commands = []
+
+    def runner(command):
+        commands.append(command)
+        if command[0] == "ffprobe":
+            return CompletedProcess(command, 0, stdout="N/A\n", stderr="")
+        Path(command[-1]).write_bytes(b"frame")
+        return CompletedProcess(command, 0, stdout="", stderr="")
+
+    report = materialize(manifest, tmp_path / "output", runner=runner)
+    row = json.loads((tmp_path / "output/features.jsonl").read_text())
+    assert report["methods"] == {"video-first-frame-no-duration": 1}
+    assert row["video_offset_seconds"] == 0.0
+    assert "-ss" not in next(command for command in commands if command[0] == "ffmpeg")
