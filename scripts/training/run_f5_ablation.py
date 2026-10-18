@@ -365,7 +365,9 @@ def execute_matrix(args: argparse.Namespace) -> dict[str, Any]:
     if args.device == "mps" and not torch.backends.mps.is_available():
         raise RuntimeError("MPS requested but torch.backends.mps.is_available() is false")
     controls, control_digest = _load_g_controls(control_root / "aggregate-metrics.json")
-    baselines, baseline_digest = _load_baseline_reference(baseline_root / "aggregate-metrics.json")
+    # The confirmation helper validates the seed-specific run directories
+    # beneath the baseline root; it does not consume the legacy aggregate file.
+    baselines, baseline_digest = _load_baseline_reference(baseline_root)
     output_root.mkdir(parents=True, exist_ok=True)
     matrix_status = output_root / "matrix-status.json"
     aggregate_path = output_root / "aggregate-metrics.json"
