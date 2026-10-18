@@ -41,3 +41,8 @@ gains persist across folds, variability is acceptable, and no dataset has a
 material unexplained regression. MAE is a calibration diagnostic and should not
 alone determine selection. Do not access the locked test until architecture,
 training, calibration, and candidate selection are frozen.
+
+The follow-on residual, gate, and ranking-pair ablation screen is specified in
+[`f5-ablation-protocol.md`](f5-ablation-protocol.md). That separate versioned
+12-run experiment reuses matching F5-G confirmation controls and does not
+change or overwrite this confirmation matrix.

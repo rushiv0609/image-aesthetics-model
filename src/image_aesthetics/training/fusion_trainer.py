@@ -84,10 +84,11 @@ def _collect(model, loader, device, calibrators=None):
         report['native_calibration']={ds:{'mae':float(np.mean(np.abs(np.asarray(v[0])-np.asarray(v[1])))),'rmse':float(np.sqrt(np.mean((np.asarray(v[0])-np.asarray(v[1]))**2)))} for ds,v in sorted(calibrated_by.items())}
     return report
 
-def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, config: dict[str,Any], epochs=50, batch_size=256, seed=20260920, device=None, patience=7, min_epochs=8, ranking_weight=.1, calibrators=None, technical_loader=None, resume: Path | None = None, status_interval_batches: int = 25, num_workers: int = 0):
+def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, config: dict[str,Any], epochs=50, batch_size=256, seed=20260920, device=None, patience=7, min_epochs=8, ranking_weight=.1, ranking_min_target_gap: float = 0.0, calibrators=None, technical_loader=None, resume: Path | None = None, status_interval_batches: int = 25, num_workers: int = 0):
     torch.manual_seed(seed); np.random.seed(seed); random.seed(seed)
     if status_interval_batches < 1: raise ValueError('status_interval_batches must be positive')
     if num_workers < 0: raise ValueError('num_workers must be non-negative')
+    if ranking_min_target_gap < 0: raise ValueError('ranking_min_target_gap must be non-negative')
     device=torch.device(device or ('mps' if torch.backends.mps.is_available() else 'cpu')); model.to(device); calibrators=calibrators.to(device) if calibrators is not None else None; out=Path(output_dir); out.mkdir(parents=True,exist_ok=True)
     sampler=DatasetBalancedBatchSampler(train_dataset,batch_size,seed=seed)
     # macOS workers are opt-in: their startup and per-worker shard caches cost
@@ -131,7 +132,8 @@ def train_fusion(model, train_dataset, validation_dataset, output_dir: Path, *, 
                 # expensive Python O(B^2) compatibility matrix construction.
                 pairing_groups=batch.get('pairing_group')
                 groups=None if pairing_groups is not None and len(set(pairing_groups)) == 1 else pairing_groups
-                loss=loss+ranking_weight*pairwise_ranking_loss(pred,y,groups=groups)
+                loss=loss+ranking_weight*pairwise_ranking_loss(
+                    pred,y,groups=groups,min_target_gap=ranking_min_target_gap)
             if hasattr(model,'regularization_loss'): loss=loss+model.regularization_loss()
             # Optional SPAQ adapter: callers may provide a callable returning a
             # scalar auxiliary loss for the current batch.  The baseline models

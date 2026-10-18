@@ -144,17 +144,30 @@ class F5G(F5ResidualBase):
     architecture_id = "F5-G-v1"
     representation_dim = 128
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, gate_enabled: bool = True, **kwargs):
         super().__init__(**kwargs)
+        self.gate_enabled = bool(gate_enabled)
         self.siglip_branch = nn.Sequential(
             nn.LayerNorm(768), nn.Linear(768, 128), nn.GELU(), nn.Linear(128, 64))
         self.clip_branch = nn.Sequential(
             nn.LayerNorm(768), nn.Linear(768, 128), nn.GELU(), nn.Linear(128, 64))
-        self.gate = nn.Sequential(nn.Linear(128, 32), nn.GELU(), nn.Linear(32, SCALAR_DIM))
+        self.gate = (nn.Sequential(nn.Linear(128, 32), nn.GELU(), nn.Linear(32, SCALAR_DIM))
+                     if self.gate_enabled else None)
         self.scalar_branch = nn.Sequential(nn.Linear(SCALAR_DIM, 32), nn.GELU())
-        nn.init.zeros_(self.gate[-1].weight)
-        nn.init.zeros_(self.gate[-1].bias)
+        if self.gate is not None:
+            nn.init.zeros_(self.gate[-1].weight)
+            nn.init.zeros_(self.gate[-1].bias)
         self._initialize_technical_head()
+
+    @property
+    def architecture_id(self):
+        return "F5-G-v1" if self.gate_enabled else "F5-G-NoGate-v1"
+
+    def architecture_config(self):
+        config = super().architecture_config()
+        config["content_gate"] = self.gate_enabled
+        config["gate_parameter_delta_vs_F5-G"] = 0 if self.gate_enabled else -4392
+        return config
 
     def _make_residual_head(self):
         return nn.Sequential(nn.Linear(168, 256), nn.GELU(), nn.Linear(256, 128), nn.GELU(), nn.Linear(128, 1))
@@ -163,11 +176,14 @@ class F5G(F5ResidualBase):
         siglip_hidden = self.siglip_branch(siglip)
         clip_hidden = self.clip_branch(clip)
         context = torch.cat((siglip_hidden, clip_hidden), dim=-1)
-        gated_scalars = scalars * (1.0 + 0.25 * torch.tanh(self.gate(context)))
+        gated_scalars = (scalars * (1.0 + 0.25 * torch.tanh(self.gate(context)))
+                         if self.gate is not None else scalars)
         scalar_hidden = self.scalar_branch(gated_scalars)
         return torch.cat((siglip_hidden, clip_hidden, scalar_hidden, scalars), dim=-1)
 
     def gate_values(self, features: torch.Tensor) -> torch.Tensor:
+        if self.gate is None:
+            return torch.ones_like(split_features(features)[2])
         siglip, clip, _ = split_features(features)
         context = torch.cat((self.siglip_branch(siglip), self.clip_branch(clip)), dim=-1)
         return 1.0 + 0.25 * torch.tanh(self.gate(context))

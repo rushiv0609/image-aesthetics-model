@@ -95,12 +95,14 @@ class FlatFeatureMLP(nn.Module):
     def forward(self, features: torch.Tensor) -> torch.Tensor: return self.net(features).squeeze(-1).sigmoid()
 
 def build_baseline(name: str, **kwargs) -> nn.Module:
-    if name in {"F5-R", "F5-G", "F5-X"}:
+    if name in {"F5-R", "F5-G", "F5-G-NoGate", "F5-X"}:
         from .f5 import F5G, F5R, F5X
+        if name == "F5-G-NoGate":
+            return F5G(gate_enabled=False, **kwargs)
         return {"F5-R": F5R, "F5-G": F5G, "F5-X": F5X}[name](**kwargs)
     factories = {"F0": WeightedScalarScore, "F1": ScalarEnsemble,
                  "F2": RegularizedLinear, "F3": ScalarMLP,
                  "F3C": CorrectedScalarMLP, "F4": FlatFeatureMLP}
     if name not in factories:
-        raise ValueError(f"unknown fusion model {name!r}; choose from {sorted((*factories, 'F5-R', 'F5-G', 'F5-X'))}")
+        raise ValueError(f"unknown fusion model {name!r}; choose from {sorted((*factories, 'F5-R', 'F5-G', 'F5-G-NoGate', 'F5-X'))}")
     return factories[name](**kwargs)

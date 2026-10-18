@@ -8,11 +8,14 @@ def calibrated_huber_loss(q, native_target, dataset_ids, calibrators: DatasetCal
     prediction=calibrators(q, dataset_ids)
     return F.huber_loss(prediction, native_target, delta=delta), prediction
 
-def pairwise_ranking_loss(scores: torch.Tensor, targets: torch.Tensor, *, groups=None, margin: float = 0.0, reduction: str = "mean"):
+def pairwise_ranking_loss(scores: torch.Tensor, targets: torch.Tensor, *, groups=None,
+                          margin: float = 0.0, min_target_gap: float = 0.0,
+                          reduction: str = "mean"):
     if scores.shape != targets.shape: raise ValueError("scores and targets must have equal shape")
     if scores.ndim != 1: raise ValueError("pairwise loss expects a one-dimensional batch")
+    if min_target_gap < 0: raise ValueError("min_target_gap must be non-negative")
     diff=scores[:,None]-scores[None,:]; target_diff=targets[:,None]-targets[None,:]
-    mask=target_diff.abs()>0
+    mask=target_diff.abs()>min_target_gap
     if groups is not None:
         if len(groups) != len(scores): raise ValueError("groups must match the batch length")
         compatible=torch.tensor([[left == right for right in groups] for left in groups],device=scores.device,dtype=torch.bool)
