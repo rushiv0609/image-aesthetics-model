@@ -460,3 +460,8 @@ status files and notify an agent only on failure, completion, or required decisi
 5. Luna: add approved dataset registry records and verification fixtures.
 6. Terra: implement the first two native adapters after archives exist.
 7. SOL review before any full multi-model feature-cache run.
+
+The final full-development fit and single-use locked-test procedure are
+specified in [`f5-finalization-protocol.md`](f5-finalization-protocol.md).
+That procedure requires an externally frozen policy and an exclusive durable
+receipt before any locked partition is opened.

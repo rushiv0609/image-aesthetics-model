@@ -24,10 +24,12 @@ class FusionTrainingDataset(Dataset):
                  allow_locked_test: bool = False, max_open_shards: int = 128,
                  normalizer: FeatureNormalizer | None = None,
                  dataset_ids: Iterable[str] | None = None):
-        if partition not in {"train", "validation", "locked_test"}:
+        if partition not in {"train", "validation", "development", "locked_test"}:
             raise ValueError(f"unknown partition: {partition}")
         if partition in {"train", "validation"} and validation_fold not in range(5):
             raise ValueError("development partitions require validation_fold in [0, 4]")
+        if partition == "development" and validation_fold is not None:
+            raise ValueError("full development partition does not accept a validation_fold")
         if partition == "locked_test" and not allow_locked_test:
             raise PermissionError("locked test requires explicit opt-in")
         self.partition = partition
@@ -40,6 +42,8 @@ class FusionTrainingDataset(Dataset):
             rows = [row for row in rows if row["locked_test"]]
         elif partition == "validation":
             rows = [row for row in rows if not row["locked_test"] and row["development_fold"] == validation_fold]
+        elif partition == "development":
+            rows = [row for row in rows if not row["locked_test"]]
         else:
             rows = [row for row in rows if not row["locked_test"] and row["development_fold"] != validation_fold]
         allowed_dataset_ids = (None if dataset_ids is None
@@ -94,8 +98,8 @@ class FusionTrainingDataset(Dataset):
 
     def fit_normalizer(self, stats_path: Path | None = None) -> FeatureNormalizer:
         """Fit only this view's development-train rows, streaming features."""
-        if self.partition != "train":
-            raise ValueError("feature normalization must be fitted on a train partition")
+        if self.partition not in {"train", "development"}:
+            raise ValueError("feature normalization must be fitted on a train or full development partition")
         identity = self.normalization_identity()
         return FeatureNormalizer.fit((self[index]["features"] for index in range(len(self))),
                                      identity=identity, stats_path=stats_path)

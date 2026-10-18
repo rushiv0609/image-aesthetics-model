@@ -45,6 +45,16 @@ def test_training_view_excludes_locked_and_validation_rows(tmp_path):
     assert dataset[0]["features"].shape == (1544,)
 
 
+def test_full_development_view_includes_all_folds_but_no_locked_rows(tmp_path):
+    split, joins = fixture(tmp_path)
+    dataset = FusionTrainingDataset(split, joins, partition="development")
+    assert {sample[2]["development_fold"] for sample in dataset.samples} == {1, 2, 3}
+    assert all(sample[2]["locked_test"] is False for sample in dataset.samples)
+    assert len(dataset) == 4
+    with pytest.raises(ValueError, match="does not accept"):
+        FusionTrainingDataset(split, joins, partition="development", validation_fold=1)
+
+
 def test_locked_test_requires_explicit_opt_in(tmp_path):
     split, joins = fixture(tmp_path)
     with pytest.raises(PermissionError):
