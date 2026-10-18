@@ -31,3 +31,12 @@ summary. It groups chronologically adjacent media into events using a fixed six-
 gap (configurable before freeze), preferring EXIF capture time and falling back to
 file modification time. Only the protocol and aggregate summary may be committed;
 the salt, paths, media, and annotations remain external.
+
+`scripts/evaluation/materialize_moments_feature_media.py` then creates one
+immutable image-like feature source per item in a new external directory.
+JPEG-like images are hard-linked without pixel changes, HEIC images are
+converted with macOS `sips` at JPEG quality 95, and videos use one ffmpeg frame
+at the exact temporal midpoint. This label-independent choice is recorded in
+`materialization-report.json`; changing it requires a new benchmark version
+rather than overwriting evidence. The derived manifest is processed by the same
+ten-signal cache providers used for training data.
