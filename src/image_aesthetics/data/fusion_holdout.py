@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
 from image_aesthetics.data.fusion_training_dataset import FusionTrainingDataset
 from image_aesthetics.data.normalization import FeatureNormalizer
@@ -17,19 +18,16 @@ class DatasetExclusionView(FusionTrainingDataset):
     preventing ordinary fold normalizers from being reused in LODO runs.
     """
 
-    def __init__(self, *args: Any, excluded_dataset: str | None = None,
+    def __init__(self, split_manifest: Path, join_dirs: Mapping[str, Path], *,
+                 excluded_dataset: str | None = None,
                  only_dataset: str | None = None, **kwargs: Any):
         if bool(excluded_dataset) == bool(only_dataset):
             raise ValueError("specify exactly one of excluded_dataset or only_dataset")
-        super().__init__(*args, **kwargs)
         self.excluded_dataset = str(excluded_dataset) if excluded_dataset else None
         self.only_dataset = str(only_dataset) if only_dataset else None
-        if self.excluded_dataset:
-            self.samples = [sample for sample in self.samples
-                            if sample[0] != self.excluded_dataset]
-        else:
-            self.samples = [sample for sample in self.samples
-                            if sample[0] == self.only_dataset]
+        visible = ({str(name) for name in join_dirs if str(name) != self.excluded_dataset}
+                   if self.excluded_dataset else {self.only_dataset})
+        super().__init__(split_manifest, join_dirs, dataset_ids=visible, **kwargs)
         if not self.samples:
             raise ValueError("dataset exclusion policy produced an empty view")
 

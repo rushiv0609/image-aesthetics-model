@@ -22,7 +22,8 @@ class FusionTrainingDataset(Dataset):
     def __init__(self, split_manifest: Path, join_dirs: Mapping[str, Path], *,
                  partition: str, validation_fold: int | None = None,
                  allow_locked_test: bool = False, max_open_shards: int = 128,
-                 normalizer: FeatureNormalizer | None = None):
+                 normalizer: FeatureNormalizer | None = None,
+                 dataset_ids: Iterable[str] | None = None):
         if partition not in {"train", "validation", "locked_test"}:
             raise ValueError(f"unknown partition: {partition}")
         if partition in {"train", "validation"} and validation_fold not in range(5):
@@ -41,6 +42,18 @@ class FusionTrainingDataset(Dataset):
             rows = [row for row in rows if not row["locked_test"] and row["development_fold"] == validation_fold]
         else:
             rows = [row for row in rows if not row["locked_test"] and row["development_fold"] != validation_fold]
+        allowed_dataset_ids = (None if dataset_ids is None
+                               else {str(name) for name in dataset_ids})
+        if allowed_dataset_ids is not None:
+            if not allowed_dataset_ids:
+                raise ValueError("dataset_ids must not be empty")
+            unknown = allowed_dataset_ids - set(join_dirs)
+            if unknown:
+                raise ValueError(f"dataset_ids lack joined feature indexes: {sorted(unknown)}")
+            # Apply the membership policy before feature indexes are opened or
+            # rows are joined. This is the key LODO leakage boundary.
+            rows = [row for row in rows
+                    if str(row["dataset_id"]) in allowed_dataset_ids]
         self.datasets = {name: JoinedTenDataset(path, max_open_shards=max_open_shards)
                          for name, path in join_dirs.items()}
         indexes = {name: {str(row["image_id"]): index for index, row in enumerate(dataset.rows)}
@@ -74,6 +87,7 @@ class FusionTrainingDataset(Dataset):
             "partition": self.partition,
             "validation_fold": self.validation_fold,
             "dataset_ids": sorted(self.datasets),
+            "row_dataset_ids": sorted({sample[0] for sample in self.samples}),
             "join_hashes": join_hashes,
             "feature_dimension": 1544,
         }

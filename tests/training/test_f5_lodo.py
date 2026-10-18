@@ -28,18 +28,47 @@ def test_lodo_plan_is_read_only_and_explicit_about_selection_boundary(tmp_path):
 def test_exclusion_view_filters_before_exposing_training_samples(monkeypatch):
     def fake_init(self, *_args, **_kwargs):
         self.partition = "train"; self.validation_fold = 0
-        self.samples = [(name, 0, {}, 0.5) for name in DATASETS]
-        self.datasets = {name: object() for name in DATASETS}
+        visible = set(_kwargs["dataset_ids"])
+        self.samples = [(name, 0, {}, 0.5) for name in DATASETS if name in visible]
+        self.datasets = {name: object() for name in visible}
         self.join_dirs = {}; self.split_manifest = Path("split.jsonl")
     monkeypatch.setattr(FusionTrainingDataset, "__init__", fake_init)
     monkeypatch.setattr(FusionTrainingDataset, "normalization_identity",
                         lambda self: {"schema_version": "base"})
-    view = DatasetExclusionView(None, {}, partition="train", validation_fold=0,
+    view = DatasetExclusionView(None, {name: Path(name) for name in DATASETS},
+                                partition="train", validation_fold=0,
                                 excluded_dataset="tad66k")
     assert {sample[0] for sample in view.samples} == set(DATASETS) - {"tad66k"}
     identity = view.normalization_identity()
     assert identity["excluded_dataset"] == "tad66k"
     assert identity["visible_dataset_ids"] == sorted(set(DATASETS) - {"tad66k"})
+
+
+def test_base_dataset_filters_rows_before_join_lookup(tmp_path, monkeypatch):
+    import json
+    import image_aesthetics.data.fusion_training_dataset as module
+
+    manifest = tmp_path / "samples.jsonl"
+    rows = [
+        {"dataset_id": "source", "image_id": "ok", "feature_id": "ok",
+         "locked_test": False, "development_fold": 1, "native_score": 0.5,
+         "native_score_range": [0, 1], "group_id": "source:1"},
+        {"dataset_id": "heldout", "image_id": "must-not-be-joined",
+         "feature_id": "must-not-be-joined", "locked_test": False,
+         "development_fold": 1, "native_score": 0.5,
+         "native_score_range": [0, 1], "group_id": "heldout:1"},
+    ]
+    manifest.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    class FakeJoined:
+        def __init__(self, _path, **_kwargs):
+            self.rows = [{"image_id": "ok"}]
+
+    monkeypatch.setattr(module, "JoinedTenDataset", FakeJoined)
+    dataset = FusionTrainingDataset(
+        manifest, {"source": tmp_path / "source"}, partition="validation",
+        validation_fold=1, dataset_ids={"source"})
+    assert [sample[0] for sample in dataset.samples] == ["source"]
 
 
 def test_source_views_do_not_open_heldout_join_index(monkeypatch, tmp_path):
