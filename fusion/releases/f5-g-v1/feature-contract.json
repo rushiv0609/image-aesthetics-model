@@ -1,0 +1,37 @@
+{
+  "blocks": {
+    "clip_embedding": [
+      772,
+      1540
+    ],
+    "local_scalars": [
+      768,
+      772
+    ],
+    "nima": [
+      1543,
+      1544
+    ],
+    "remaining_scalars": [
+      1540,
+      1543
+    ],
+    "siglip2_embedding": [
+      0,
+      768
+    ]
+  },
+  "dimension": 1544,
+  "query_dependent_signals": false,
+  "scalar_order": [
+    "a1_siglip",
+    "laion_clip",
+    "nima",
+    "musiq_aesthetic",
+    "musiq_technical",
+    "sharpness",
+    "contrast",
+    "colorfulness"
+  ],
+  "schema_version": "joined-ten-v1"
+}

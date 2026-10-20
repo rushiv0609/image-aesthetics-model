@@ -28,6 +28,8 @@ Everything in this repo — the data pipelines, the model architectures, the tra
 | [AVA SigLIP 2 Training Implementation Plan](docs/ava-siglip2-training-implementation-plan.md) | Data acquisition, external storage, leakage-resistant splits, pre-embedding, architecture search, training, evaluation, and export plan for Base 224 |
 | [Final Multi-Signal Scorer Plan](docs/final-fusion-model-plan.md) | Independent dataset portfolio, leakage controls, critical architecture review, selected fusion design, training protocol, and release gates |
 | [Final Fusion Implementation Plan](docs/final-fusion-implementation-plan.md) | Detailed phased implementation, storage contracts, dataset registry, acquisition, adapters, caching, baselines, F5 training, and integration |
+| [F5-G v1 Final Report](docs/f5-final-report.md) | Final selection evidence, one-time locked-test result, limitations, and artifact inventory |
+| [F5-G v1 Release and Integration](docs/f5-g-v1-release-and-integration.md) | Versioned release bundle, strict inference contract, and Moments Generator handoff |
 | [AGENTS.md](AGENTS.md) | Rules and context for AI agents working on this repo |
 
 ## Hardware Target
@@ -39,6 +41,8 @@ All training and inference must run on:
 
 ## Current Status
 
-🧪 **Phase: Fusion planning and data acquisition** — The SigLIP2 A1 head is finalized
-and exported after one locked-test evaluation. The independent multi-dataset fusion
-pipeline is now specified for implementation.
+✅ **Complete:** The final `F5-G-v1` three-seed fusion ensemble is trained,
+evaluated exactly once on the locked test, and exported at
+[`fusion/releases/f5-g-v1/`](fusion/releases/f5-g-v1/). Remaining product work
+belongs in Moments Generator: integration, shadow ranking, and the blinded
+human benchmark with real raters.

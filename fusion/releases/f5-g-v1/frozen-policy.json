@@ -1,0 +1,97 @@
+{
+  "architecture": {
+    "content_gate": true,
+    "feature_contract": "joined-ten-v1",
+    "feature_dimension": 1544,
+    "gate_parameter_delta_vs_F5-G": 0,
+    "kwargs": {},
+    "model_id": "F5-G-v1",
+    "parameter_count": 297426,
+    "residual_bound": 0.25,
+    "scalar_base": "fold-specific F2 pre-sigmoid logit",
+    "scalar_order": [
+      "a1_siglip",
+      "laion_clip",
+      "nima",
+      "musiq_aesthetic",
+      "musiq_technical",
+      "sharpness",
+      "contrast",
+      "colorfulness"
+    ],
+    "technical_head": false
+  },
+  "calibration": {
+    "choice": "shared-isotonic-v1",
+    "oof_predictions_sha256": "447f2ecd6c2cceb2a7d686ee9be2057705613e08a661d5a1576c92ad6ce19383",
+    "path": "/Users/rushivyas/datasets/image-aesthetics/fusion/experiments/f5-calibration-v1/shared-isotonic/shared-calibrator.json",
+    "sha256": "f728850068c920c12a3b425df24be293c988217c88e514318b5d98416f6008f5"
+  },
+  "candidate": "F5-G",
+  "checkpoint_policy": {
+    "candidate_epoch_median": 34,
+    "early_stopping": false,
+    "epoch_source": "median confirmation best epochs",
+    "f2_epoch_median": 32,
+    "mode": "fixed-epoch-final"
+  },
+  "epochs": {
+    "candidate": 34,
+    "f2": 32
+  },
+  "evidence_hashes": {
+    "ablation_aggregate": "05201941df832cae692911450d54d969ae0d378cea65c591f70ee64e9f002032",
+    "calibration_report": "4a9bc2fc565356e78d21fcc9ced16e34b415eded3061def898ab828cf63ec620",
+    "lodo_aggregate": "d7e1792bbe8e69804651c026256ead10f69cbea16a55268e4f86e282e863f25a",
+    "moments_automated_evaluation": "4caaee28f4fdc80ff6fbc2f5b1fe9d766745875352b6b1f592b397af8191023e",
+    "moments_prediction_report": "43b2678719caf6690e5f2a9ff10f6111cef1481d10cfc22baedab2cf65bb2ef5"
+  },
+  "feature_hashes": {
+    "aadb": "b36d8404cf52c209d0f9fea99c51ca3cb00e8460269ca7f41ac5d9ed40782568",
+    "flickr_aes": "35e9c51ae3beafe8da935b5d9fc5a3a796462cbd932c2ab17898b205e22e157c",
+    "para": "ee9d66329cf0655e594b144d16557dbc378efcc97543ea97b9649ab4c020a91f",
+    "tad66k": "4f30b38f8dadf9c4f627b0155f07df6a5cf9a504d5dff54c6eb76ed8fa459bbf"
+  },
+  "objective": {
+    "aesthetic_loss": "calibrated-huber",
+    "calibration_heads": "training-only dataset heads",
+    "ranking_loss": "compatible-pairwise"
+  },
+  "preprocessing": {
+    "feature_contract": "joined-ten-v1",
+    "normalization": "full-development streaming mean/std",
+    "query_dependent_signals": false
+  },
+  "schema_version": "f5-frozen-policy-v1",
+  "seeds": [
+    20260920,
+    20260921,
+    20260922
+  ],
+  "split_sha256": "97d0a0b4b487655bac1bcd4efe5f4c8cb0e8af5d39d57691f55505103f689ea9",
+  "thresholds": {
+    "ablation_max_variants": 3,
+    "ablation_seeds_per_variant": 2,
+    "ablation_validation_folds": [
+      2,
+      3
+    ],
+    "locked_test_evaluations_allowed": 1,
+    "lodo_datasets_required": 4,
+    "moments_human_release_gate": "pending-real-raters",
+    "promotion_requires_both_folds_positive_spearman": true,
+    "promotion_requires_no_material_regression": true
+  },
+  "training": {
+    "batch_size": 1024,
+    "datasets": [
+      "aadb",
+      "flickr_aes",
+      "para",
+      "tad66k"
+    ],
+    "device": "mps",
+    "ranking_min_target_gap": 0.0,
+    "ranking_weight": 0.1
+  }
+}

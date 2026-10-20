@@ -11,6 +11,7 @@ __pycache__/
 **/artifacts/
 **/outputs/
 *.safetensors
+!fusion/releases/*/*.safetensors
 *.sqlite3
 *.sqlite
 *.db

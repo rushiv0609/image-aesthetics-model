@@ -1,0 +1,16 @@
+{
+  "files": {
+    "calibration.json": "f728850068c920c12a3b425df24be293c988217c88e514318b5d98416f6008f5",
+    "feature-contract.json": "fdeaa49ffd23dc91e386c9978ac56bf2f7542cc3dad86d905e93951fbd7c2072",
+    "frozen-policy.json": "ca5812c4b4a64887f57ab295cfcdc9ceac33f6c9df540b131cf281d962eabebd",
+    "metrics.json": "111dd916d3aa704c1969d6777bae73585317ba3fdb3a1b0b2d309e267a475c64",
+    "model-config.json": "f20cd078ac07f78d5e4ef9d6e06dff03631b2d51ef8b5ebb5b68b16ea8d34735",
+    "model-seed-20260920.safetensors": "e5af678c7bd897b7a6e6589267523ffafa46fd8df28215cfefb67b0af6c6ffb9",
+    "model-seed-20260921.safetensors": "d0e7341f480c04a9c9aa93d909f626f3ce2e8f9844161acfa707c9b4cd914ea2",
+    "model-seed-20260922.safetensors": "7871ebf766fee06ae101642d5e0d0c60be64aa70780b35a52019acd761642553",
+    "normalization.json": "12d0afbcdc71e1dda1d531434f7c17107d3404e53b5e8c41fd065443a7226038",
+    "provenance.json": "3677f310e2ba2ca7138ee9ae21d9ce76da43c336659fb169baf86c921676bb97"
+  },
+  "model_version": "f5-g-v1",
+  "schema_version": "f5-g-release-manifest-v1"
+}

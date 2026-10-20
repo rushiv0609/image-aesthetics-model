@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 mlx = ["mlx>=0.20", "transformers>=4.45", "torch>=2.2"]
 safetensors = ["safetensors>=0.4"]
+fusion = ["torch>=2.2", "safetensors>=0.4"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]

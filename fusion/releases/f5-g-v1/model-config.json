@@ -1,0 +1,60 @@
+{
+  "architecture": {
+    "content_gate": true,
+    "feature_contract": "joined-ten-v1",
+    "feature_dimension": 1544,
+    "gate_parameter_delta_vs_F5-G": 0,
+    "kwargs": {},
+    "model_id": "F5-G-v1",
+    "parameter_count": 297426,
+    "residual_bound": 0.25,
+    "scalar_base": "fold-specific F2 pre-sigmoid logit",
+    "scalar_order": [
+      "a1_siglip",
+      "laion_clip",
+      "nima",
+      "musiq_aesthetic",
+      "musiq_technical",
+      "sharpness",
+      "contrast",
+      "colorfulness"
+    ],
+    "technical_head": false
+  },
+  "ensemble": "mean-of-three-seeds",
+  "feature_contract": "joined-ten-v1",
+  "feature_dimension": 1544,
+  "members": [
+    {
+      "file": "model-seed-20260920.safetensors",
+      "seed": 20260920,
+      "source_checkpoint_sha256": "f611e158f7daa75bffc7eab87a57ecf7a4bb7a4eb13c444024f8c97415933010"
+    },
+    {
+      "file": "model-seed-20260921.safetensors",
+      "seed": 20260921,
+      "source_checkpoint_sha256": "bef79b827d8ba0f0d6e456ef1b9cf006b21263c3874edd896ca8758f1c07d93f"
+    },
+    {
+      "file": "model-seed-20260922.safetensors",
+      "seed": 20260922,
+      "source_checkpoint_sha256": "1879329a1c71e6ec27a99475bd18a2fdd9868eec706546917f527db8f83bef0b"
+    }
+  ],
+  "model_version": "f5-g-v1",
+  "outputs": {
+    "production": "shared isotonic calibrated [0,1]",
+    "raw": "ensemble mean"
+  },
+  "scalar_order": [
+    "a1_siglip",
+    "laion_clip",
+    "nima",
+    "musiq_aesthetic",
+    "musiq_technical",
+    "sharpness",
+    "contrast",
+    "colorfulness"
+  ],
+  "schema_version": "f5-g-model-config-v1"
+}
